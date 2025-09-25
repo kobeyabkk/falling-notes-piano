@@ -14,3 +14,6 @@ dist/
 
 # vercel local dir (もし生成されていたら)
 .vercel/
+
+# mac
+.DS_Store
