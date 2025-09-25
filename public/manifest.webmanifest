@@ -1,0 +1,16 @@
+{
+  "name": "Falling Notes Piano",
+  "short_name": "FNPiano",
+  "description": "MIDIを落下ノートで練習。生成サンプル＆ライブラリ付き。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0b1219",
+  "theme_color": "#0b1219",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
+
