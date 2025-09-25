@@ -39,24 +39,33 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // 1) HTML: ネット優先 + オフライン時は index.html にフォールバック
+  // 1) HTML: Cache-First（オフライン殻を最優先）＋ 背景で最新に更新
   if (req.mode === "navigate" || req.destination === "document") {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          // 次回のために index.html を更新
-          const copy = res.clone();
-          caches.open(STATIC_CACHE).then((c) => c.put("/index.html", copy));
-          return res;
-        })
-        .catch(() =>
-          caches.match("/index.html").then((hit) => hit || caches.match("/"))
-        )
+      caches.match("/index.html").then((cached) => {
+        const updating = fetch(req)
+          .then((res) => {
+            // 次回用に index.html と / の両方を更新しておく
+            const copy = res.clone();
+            caches.open(STATIC_CACHE).then((c) => {
+              c.put("/index.html", copy.clone());
+              c.put("/", copy);
+            });
+            return res;
+          })
+          .catch(() => null);
+
+        // まずはキャッシュを即返す（あれば）
+        if (cached) return cached;
+
+        // ない時だけネット（失敗したら最後にフォールバック）
+        return updating.then((res) => res || caches.match("/") || Response.error());
+      })
     );
     return;
   }
 
-  // 2) Vite の静的アセット（/assets/…）: キャッシュ優先（Cache First）
+  // 2) Vite の静的アセット（/assets/…）: Cache First
   if (url.origin === self.location.origin && url.pathname.startsWith("/assets/")) {
     event.respondWith(
       caches.match(req).then((hit) => {
@@ -73,13 +82,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 3) 外部CDN（例: Salamander音源など）: Stale-While-Revalidate
+  // 3) 外部CDN（例: 音源など）: Stale-While-Revalidate
   if (url.origin !== self.location.origin) {
     event.respondWith(
       caches.match(req).then((hit) => {
         const fetching = fetch(req)
           .then((res) => {
-            // opaque レスポンスでも put 可能
             caches.open(STATIC_CACHE).then((c) => c.put(req, res.clone())).catch(() => {});
             return res;
           })
@@ -90,8 +98,9 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 4) その他: キャッシュ → ネット（簡易フォールバック）
+  // 4) その他: キャッシュ → ネット → 最後に index.html
   event.respondWith(
     caches.match(req).then((hit) => hit || fetch(req).catch(() => caches.match("/index.html")))
   );
 });
+
