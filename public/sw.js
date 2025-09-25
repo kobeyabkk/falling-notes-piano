@@ -1,12 +1,15 @@
-/* simple service worker for FNPiano */
-const VERSION = "v1.0.0";
-const STATIC_CACHE = `fnp-static-${VERSION}`;
+/* Falling Notes Piano - Service Worker */
+const VERSION = "v1.0.1";
+const CACHE_PREFIX = "fnp-static-";
+const STATIC_CACHE = `${CACHE_PREFIX}${VERSION}`;
 
 const STATIC_ASSETS = [
-  "/",              // ルート
-  "/index.html",
-  "/manifest.webmanifest"
-  // Viteのハッシュ付きassetsは動的にキャッシュする（明示列挙しない）
+  "/",                   // ルート（Vercelのルーティング都合で残す）
+  "/index.html",         // HTML本体
+  "/manifest.webmanifest",
+  "/icons/icon-192.png", // PWAアイコン（事前キャッシュ）
+  "/icons/icon-512.png"
+  // /assets/ 以下はハッシュ付きビルド資産なので動的にキャッシュ
 ];
 
 // ---- install: 主要ファイルを事前キャッシュ ----
@@ -17,11 +20,15 @@ self.addEventListener("install", (event) => {
   self.skipWaiting();
 });
 
-// ---- activate: 古いキャッシュの整理 ----
+// ---- activate: 古いバージョンのキャッシュを削除 ----
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.map((k) => (k.startsWith("fnp-") && k !== STATIC_CACHE) ? caches.delete(k) : null))
+      Promise.all(
+        keys
+          .filter((k) => k.startsWith(CACHE_PREFIX) && k !== STATIC_CACHE)
+          .map((k) => caches.delete(k))
+      )
     )
   );
   self.clients.claim();
@@ -32,26 +39,33 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // 1) HTML: ネット優先（オフライン時のフォールバック）
-  if (req.mode === "navigate" || (req.destination === "document")) {
+  // 1) HTML: ネット優先 + オフライン時は index.html にフォールバック
+  if (req.mode === "navigate" || req.destination === "document") {
     event.respondWith(
-      fetch(req).then((res) => {
-        const copy = res.clone();
-        caches.open(STATIC_CACHE).then((c) => c.put("/", copy));
-        return res;
-      }).catch(() => caches.match("/") || caches.match("/index.html"))
+      fetch(req)
+        .then((res) => {
+          // 次回のために index.html を更新
+          const copy = res.clone();
+          caches.open(STATIC_CACHE).then((c) => c.put("/index.html", copy));
+          return res;
+        })
+        .catch(() =>
+          caches.match("/index.html").then((hit) => hit || caches.match("/"))
+        )
     );
     return;
   }
 
-  // 2) Viteの静的アセット（/assets/）: キャッシュ優先
-  if (url.pathname.startsWith("/assets/")) {
+  // 2) Vite の静的アセット（/assets/…）: キャッシュ優先（Cache First）
+  if (url.origin === self.location.origin && url.pathname.startsWith("/assets/")) {
     event.respondWith(
       caches.match(req).then((hit) => {
         if (hit) return hit;
         return fetch(req).then((res) => {
-          const copy = res.clone();
-          caches.open(STATIC_CACHE).then((c) => c.put(req, copy));
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(STATIC_CACHE).then((c) => c.put(req, copy));
+          }
           return res;
         });
       })
@@ -59,24 +73,25 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 3) 外部CDN（Salamander等）は「実行時: stale-while-revalidate」
+  // 3) 外部CDN（例: Salamander音源など）: Stale-While-Revalidate
   if (url.origin !== self.location.origin) {
     event.respondWith(
       caches.match(req).then((hit) => {
-        const net = fetch(req).then((res) => {
-          // opaqueでもput可能（CORS: no-corsレスポンス）
-          const copy = res.clone();
-          caches.open(STATIC_CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          return res;
-        }).catch(() => null);
-        return hit || net || Response.error();
+        const fetching = fetch(req)
+          .then((res) => {
+            // opaque レスポンスでも put 可能
+            caches.open(STATIC_CACHE).then((c) => c.put(req, res.clone())).catch(() => {});
+            return res;
+          })
+          .catch(() => null);
+        return hit || fetching || Response.error();
       })
     );
     return;
   }
 
-  // 4) それ以外は「キャッシュ→ネット」の簡易フォールバック
+  // 4) その他: キャッシュ → ネット（簡易フォールバック）
   event.respondWith(
-    caches.match(req).then((hit) => hit || fetch(req).catch(() => caches.match("/")))
+    caches.match(req).then((hit) => hit || fetch(req).catch(() => caches.match("/index.html")))
   );
 });
