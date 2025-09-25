@@ -1,9 +1,4 @@
-/* 変更点（わかりやすいメモ）
- * - 左手伴奏を追加：none / bass / block / alberti（UIで選択）
- * - 生成関数が右手メロディ＋左手パターンをまとめてMIDI化
- * - 保存メタに leftHand を追加（ライブラリ表示にも反映）
- */
-
+// App.jsx
 import React, { useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
 import { Midi } from "@tonejs/midi";
@@ -11,6 +6,7 @@ import { listSongs, saveSong, loadSongBytes, removeSong } from "./db";
 
 /**
  * Falling Notes Piano – 視認性UP & 教育特化版（安定化＋エラーハンドリング強化）
+ * + 生成（MVP）：キー/長短/テンポ/小節/難易度 を指定してメロディをクライアント生成
  */
 
 const KEY_COUNT = 88;
@@ -21,8 +17,8 @@ const MIDDLE_C = 60;
 const NOTE_MIN_HEIGHT = 10;
 const SPEED = 140;     // px/sec
 const KB_HEIGHT = 140; // keyboard height (px)
-const VISUAL_MAX_SEC = 2.5;
-const STOP_TAIL = 1.0;
+const VISUAL_MAX_SEC = 2.5; // 表示上の最大長（音は実長で鳴らす）
+const STOP_TAIL = 1.0; // 自動停止の安全マージン（秒）
 
 const FLASH_MS = 120;
 const MIN_LIT_SEC = 0.12;
@@ -163,42 +159,6 @@ function analyzeNoteRangeAuto(notes){
   return { minMidi:min, maxMidi:max };
 }
 
-// ---------- 生成（ルールベースV0）補助 ----------
-const KEY_OFFSETS = { C:0, "C#":1, Db:1, D:2, "D#":3, Eb:3, E:4, F:5, "F#":6, Gb:6, G:7, "G#":8, Ab:8, A:9, "A#":10, Bb:10, B:11 };
-const MAJOR_SCALE = [0,2,4,5,7,9,11];
-const pick = (arr, probs)=> {
-  if(!probs){ return arr[(Math.random()*arr.length)|0]; }
-  const r = Math.random(); let acc=0;
-  for(let i=0;i<arr.length;i++){ acc += probs[i] ?? 0; if(r<=acc) return arr[i]; }
-  return arr[arr.length-1];
-};
-const quantizeToScale = (midi, rootOffset) => {
-  const degs = MAJOR_SCALE.map(x => (rootOffset + x) % 12);
-  let best = midi, bestD = 999;
-  for(const d of degs){
-    const base = Math.round((midi - d)/12)*12 + d;
-    const cand = [base-12, base, base+12];
-    for(const c of cand){
-      const diff = Math.abs(c - midi);
-      if(diff < bestD){ bestD = diff; best = c; }
-    }
-  }
-  return best;
-};
-
-// 左手：簡易コード進行（I–V–vi–IV）をキーに合わせて移調
-function chordRootsForBar(barIndex){
-  const prog = [0, 7, 9, 5]; // C基準: C(0), G(7), A(9), F(5)
-  return prog[barIndex % prog.length];
-}
-function triadSemitones(rootSemitone){
-  // メジャーキー内の I, V, vi, IV をメジャー/マイナー適宜（viはマイナー）
-  // ここでは「度数から推定」で簡略化
-  const degree = (rootSemitone % 12 + 12) % 12;
-  const isMinor = (degree === 9); // viのみ
-  return isMinor ? [0, 3, 7] : [0, 4, 7];
-}
-
 // ---------- particles / ripples / aura ----------
 function spawnParticles(store, {x,y,color}, level){
   const count = level==='standard' ? 8 : 14;
@@ -228,9 +188,9 @@ export default function App(){
   const [isPlaying, setIsPlaying] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const [duration, setDuration] = useState(0);
-  const durationRef = useRef(0);
+  const durationRef = useRef(0); // 実長（停止判定用）
   const [visualEnd, setVisualEnd] = useState(0);
-  const endTimeRef = useRef(Infinity);
+  const endTimeRef = useRef(Infinity); // 視覚的な終了時刻（即時反映）
 
   const [rate, setRate] = useState(1);
   const rateRef = useRef(1);
@@ -248,13 +208,12 @@ export default function App(){
   const [viewMinMidi, setViewMinMidi] = useState(A0_MIDI);
   const [viewMaxMidi, setViewMaxMidi] = useState(C8_MIDI);
 
-  // 生成パラメータ
-  const [genKey, setGenKey] = useState("C");
-  const [genTempo, setGenTempo] = useState(90);
-  const [genBars, setGenBars] = useState(8);
-  const [genDensity, setGenDensity] = useState("mid");
-  const [genMaxVoices, setGenMaxVoices] = useState(1);
-  const [leftHand, setLeftHand] = useState("none"); // none | bass | block | alberti
+  // --- 生成パラメータ（MVP） ---
+  const [genKey, setGenKey] = useState("C");             // C,D,E,F,G,A,B
+  const [genScale, setGenScale] = useState("major");     // major | minor
+  const [genTempo, setGenTempo] = useState(90);          // bpm
+  const [genBars, setGenBars] = useState(8);             // 小節数
+  const [genDifficulty, setGenDifficulty] = useState(2); // 1..3
 
   // library UI
   const [libOpen, setLibOpen] = useState(false);
@@ -286,8 +245,8 @@ export default function App(){
   const instrumentRef = useRef(null);
 
   // hit state
-  const keyFlashRef = useRef(new Map());
-  const landedAtRef = useRef(new Map());
+  const keyFlashRef = useRef(new Map()); // midi -> until(sec)
+  const landedAtRef = useRef(new Map()); // noteId -> t
 
   // visuals
   const particlesRef = useRef([]);
@@ -382,10 +341,11 @@ export default function App(){
   function cancelRAF(){ rafActiveRef.current=false; if(rafIdRef.current){ cancelAnimationFrame(rafIdRef.current); rafIdRef.current=0; } }
   function startRAF(){ if(rafActiveRef.current) return; rafActiveRef.current=true; rafIdRef.current=requestAnimationFrame(draw); }
 
+  // visualEnd → endTimeRef へ即反映（未確定時はInfinity）
   function recomputeVisualEnd(H, src){
     if(!H || !src.length){
       setVisualEnd(0);
-      endTimeRef.current = Infinity;
+      endTimeRef.current = Infinity; // 未確定なら止めない
       return;
     }
     const visualH = H - KB_HEIGHT;
@@ -396,7 +356,7 @@ export default function App(){
       if(disappear > maxT) maxT = disappear;
     }
     setVisualEnd(maxT);
-    endTimeRef.current = maxT;
+    endTimeRef.current = maxT; // refに即時反映
   }
 
   // ====== MIDIロード共通 ======
@@ -419,7 +379,7 @@ export default function App(){
       const dur = merged.reduce((mx,n)=>Math.max(mx,n.end),0);
       setNotes(merged);
       setDuration(dur);
-      durationRef.current = dur;
+      durationRef.current = dur; // refにも保持
       setName("Generated.mid");
 
       applyRangePreset(rangePreset, merged);
@@ -442,134 +402,91 @@ export default function App(){
     }
   }
 
-  // ====== 生成（右手メロディ＋左手伴奏） ======
+  // ====== 生成（MVP：ルールベース） ======
   function toArrayBufferFromU8(u8){
     return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
   }
 
-  function buildRuleBasedSequence({key="C", tempo=90, bars=8, density="mid", maxVoices=1, rangePresetForGen="auto", leftHand="none"}){
-    const rootOffset = KEY_OFFSETS[key] ?? 0;
-    const stepsPerBar = 16; // 16分
-    const totalSteps = bars * stepsPerBar;
-
-    // 右手メロディ設定
-    const durChoices = {
-      low:  [8,4,2],
-      mid:  [4,2,8],
-      high: [2,4,1]
-    };
-    const durProbs = {
-      low:  [0.55,0.35,0.10],
-      mid:  [0.45,0.40,0.15],
-      high: [0.55,0.35,0.10]
-    };
-    const voicesProb = (maxVoices===2) ? 0.2 : 0.0;
-
-    // レンジ（右手：C4–C6、左手：C2–C4 目安）
-    const rightRange = {minMidi: clampMidi(MIDDLE_C), maxMidi: clampMidi(MIDDLE_C+24)};
-    const leftRange  = {minMidi: clampMidi(36), maxMidi: clampMidi(60)}; // C2(36)–C4(60)
-
-    // 右手生成
-    let cur = 60 + rootOffset;
-    const eventsR = [];
-    let tStep = 0;
-    while(tStep < totalSteps){
-      const d = pick(durChoices[density] || durChoices.mid, durProbs[density] || durProbs.mid);
-      const move = pick([-4,-2,0,2,4,5,7], [0.12,0.18,0.24,0.18,0.12,0.08,0.08]);
-      let next = cur + move;
-      next = quantizeToScale(next, rootOffset);
-      next = clamp(next, rightRange.minMidi, rightRange.maxMidi);
-      if(Math.abs(next-cur) > 7 && Math.random() < 0.8){ continue; }
-
-      const vel = 0.82 + Math.random()*0.15;
-      eventsR.push({ start:tStep, dur:d, pitch:next, vel });
-
-      if(maxVoices===2 && Math.random()<voicesProb){
-        const harm = clamp(quantizeToScale(next + pick([4,7,-5]), rootOffset), rightRange.minMidi, rightRange.maxMidi);
-        eventsR.push({ start:tStep, dur:d, pitch:harm, vel:Math.max(0.6, vel-0.1) });
-      }
-
-      cur = next;
-      tStep += d;
-    }
-
-    // 左手生成（バー単位の進行）
-    const eventsL = [];
-    const barSteps = stepsPerBar;
-    for(let bar=0; bar<bars; bar++){
-      const chordRootSemitone = (chordRootsForBar(bar) + rootOffset) % 12;
-      // 近いオクターブに寄せてからC2–C4に収める
-      let rootMidi = quantizeToScale(48 + chordRootSemitone, chordRootSemitone); // だいたいC3帯
-      while(rootMidi < leftRange.minMidi) rootMidi += 12;
-      while(rootMidi > leftRange.maxMidi-12) rootMidi -= 12;
-
-      const triad = triadSemitones(chordRootSemitone).map(s=>rootMidi + s);
-      const t0 = bar * barSteps;
-
-      if(leftHand === "bass"){
-        // ルートの4分刻み
-        for(let s=0; s<stepsPerBar; s+=4){
-          eventsL.push({ start:t0+s, dur:4, pitch:rootMidi, vel:0.7 });
-        }
-      }else if(leftHand === "block"){
-        // ブロック和音（2拍ごと）
-        for(let s=0; s<stepsPerBar; s+=8){
-          for(const p of triad){
-            eventsL.push({ start:t0+s, dur:8, pitch:clamp(p, leftRange.minMidi, leftRange.maxMidi), vel:0.68 });
-          }
-        }
-      }else if(leftHand === "alberti"){
-        // アルベルティ（低-高-中-高 を8分で繰り返し）
-        const [low, mid, high] = [triad[0], triad[1], triad[2]].sort((a,b)=>a-b);
-        for(let s=0; s<stepsPerBar; s+=2*4){ // 1拍=4ステップ（16分×4） → 8分=2ステップ
-          const pat = [low, high, mid, high];
-          for(let i=0;i<pat.length;i++){
-            eventsL.push({ start:t0 + s + i*2, dur:2, pitch:clamp(pat[i], leftRange.minMidi, leftRange.maxMidi), vel:0.68 });
-          }
-        }
-      }else{
-        // none：何もしない
-      }
-    }
-
-    // 16分単位 → 秒換算
-    const qPerSec = tempo / 60;
-    const stepSec = (1/4) / qPerSec; // 16分の長さ
-    const toSec = e => ({
-      time: e.start*stepSec,
-      duration: Math.max(0.1, e.dur*stepSec),
-      midi: e.pitch,
-      velocity: e.vel
-    });
-
-    return [...eventsR.map(toSec), ...eventsL.map(toSec)];
+  const KEY_TO_SEMITONE = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
+  function buildScaleIntervals(scale){
+    return scale==="minor" ? [0,2,3,5,7,8,10,12] : [0,2,4,5,7,9,11,12]; // 自然的短音階/長音階
   }
+
+  function randomChoice(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+  function clampToRange(m){ return clampMidi(m); }
 
   async function generateAndLoad() {
     try {
-      const events = buildRuleBasedSequence({
-        key: genKey,
-        tempo: genTempo,
-        bars: genBars,
-        density: genDensity,
-        maxVoices: genMaxVoices,
-        rangePresetForGen: rangePreset,
-        leftHand
-      });
+      const tempo = clamp(genTempo, 50, 160);
+      const bars = clamp(genBars, 2, 32);
+      const difficulty = clamp(genDifficulty, 1, 3);
 
       const midi = new Midi();
-      midi.header.setTempo(genTempo);
+      midi.header.setTempo(tempo);
+
       const tr = midi.addTrack();
-      for(const ev of events){
-        tr.addNote({ midi: ev.midi, time: ev.time, duration: ev.duration, velocity: ev.velocity });
+      const rootSemitone = KEY_TO_SEMITONE[genKey] ?? 0;
+      const scale = buildScaleIntervals(genScale);
+      const rootOct = 60; // C4を基準、選んだキーにシフト
+
+      // リズム：難易度で密度を切替
+      // diff=1: 1/2音符中心, diff=2: 1/4中心, diff=3: 1/8混在
+      const rhythmPool =
+        difficulty===1 ? [1.0, 0.5, 0.5, 1.0] :
+        difficulty===2 ? [0.5, 0.5, 0.25, 0.25, 1.0] :
+                         [0.25, 0.25, 0.5, 0.25, 0.125, 0.375];
+
+      // メロディ方針：スケール内を小さな歩幅でランダムウォーク（跳躍抑制）、小節末は着地
+      const totalBeats = bars * 4; // 4/4のみ（MVP）
+      let tBeat = 0;
+      let degreeIdx = 0; // スケール内の位置
+      let currentMidi = clampToRange(rootOct + rootSemitone + scale[degreeIdx]);
+
+      while(tBeat < totalBeats - 1e-6){
+        let dur = randomChoice(rhythmPool);
+        if(tBeat + dur > totalBeats) dur = totalBeats - tBeat;
+
+        // 小節終端は主音or和声音へ寄せる
+        const atBarEnd = Math.abs((tBeat % 4) + dur - 4) < 1e-6;
+        const targetDegrees = genScale==="major" ? [0,4,7,12] : [0,3,7,12]; // I和声音
+        if(atBarEnd){
+          const tg = randomChoice(targetDegrees);
+          currentMidi = clampToRange(rootOct + rootSemitone + tg);
+        }else{
+          // ランダムウォーク：-2..+2度の範囲で移動（跳躍抑制）
+          const step = randomChoice([-2,-1,0,1,1,2]); // 上行を少し優先
+          degreeIdx = clamp(degreeIdx + step, 0, scale.length-1);
+          currentMidi = clampToRange(rootOct + rootSemitone + scale[degreeIdx]);
+          // たまにオクターブ上げ下げ（難易度3のみ）
+          if(difficulty===3 && Math.random()<0.15){
+            const up = Math.random()<0.5 ? -12 : 12;
+            currentMidi = clampToRange(currentMidi + up);
+          }
+        }
+
+        // 休符：難易度1で少なめ、3でやや多め
+        const restProb = difficulty===1 ? 0.05 : difficulty===2 ? 0.1 : 0.15;
+        const isRest = Math.random() < restProb;
+
+        if(!isRest){
+          const timeSec = (tBeat / (tempo/60));
+          const durSec  = Math.max(0.12, dur / (tempo/60));
+          tr.addNote({
+            midi: currentMidi,
+            time: timeSec,
+            duration: durSec,
+            velocity: 0.8 + Math.random()*0.15
+          });
+        }
+        tBeat += dur;
       }
 
       const bytes = midi.toArray();
       await loadMidiFromBytes(toArrayBufferFromU8(bytes));
-      setName(`Generated_${genKey}_${genTempo}bpm_${genBars}bars_${leftHand}.mid`);
+      setName(`${genKey}${genScale==="major"?"":"m"}_${tempo}bpm_${bars}bars.mid`);
     } catch (e) {
       console.error(e);
-      alert("サンプル曲の生成に失敗しました。");
+      alert("生成に失敗しました。");
     }
   }
 
@@ -610,6 +527,7 @@ export default function App(){
     await Tone.start();
     cancelRAF();
 
+    // 再生開始時に visualEnd を再計算（高さ未確定対策）
     const H = canvasSizeRef.current.H || canvasRef.current?.getBoundingClientRect().height || 0;
     recomputeVisualEnd(H, notes);
 
@@ -675,6 +593,7 @@ export default function App(){
       inst.triggerAttackRelease?.(note, durSec, undefined, velocity);
     } catch (error) {
       console.warn("triggerNote failed:", error);
+      // 音で失敗してもアプリは止めない
     }
   }
 
@@ -690,13 +609,7 @@ export default function App(){
       tr.addNote({ midi:n.midi, time:n.start, duration: Math.max(0.05, n.end-n.start), velocity: n.vel ?? 0.9 });
     }
     const bytes = midi.toArray();
-
-    const metaSettings = {
-      key: genKey, tempo: genTempo, bars: genBars, density: genDensity, maxVoices: genMaxVoices,
-      rangePreset, leftHand
-    };
-
-    await saveSong(nm, bytes, metaSettings);
+    await saveSong(nm, bytes);
     alert("保存しました。");
   }
   async function openLibrary(){
@@ -726,9 +639,10 @@ export default function App(){
     const now = Tone.now();
     let t = isPlayingRef.current ? (now - t0Ref.current)*rateRef.current : playheadRef.current;
 
+    // 終了判定：ref優先（state遅延を回避）
     const limitVisual = endTimeRef.current;
     const limit = Math.max(durationRef.current, isFinite(limitVisual) ? limitVisual : 0) + STOP_TAIL;
-    const epsilon = 1/60;
+    const epsilon = 1/60; // 1フレームの余裕
 
     if(isPlayingRef.current && limit>0 && t >= limit - epsilon){
       t = limit;
@@ -822,7 +736,7 @@ export default function App(){
       const yTopPrev = timeToYTop(tPrev, n.start, totalVisual, h);
       const yBottomPrev = yTopPrev + h;
 
-      // 発音判定
+      // 発音判定（try/catchで保護）
       const crossed = (yBottomPrev < keylineY) && (yBottom >= keylineY);
       const justLanded = isPlayingRef.current && crossed && !landedAtRef.current.has(n.i);
       if(justLanded){
@@ -835,6 +749,7 @@ export default function App(){
           console.warn("Note trigger failed:", err);
         }
 
+        // ビジュアル（音が失敗しても実行）
         if(effectLevel!=="focus"){
           const xCenter = xForMidi(n.midi, W) + wKey/2;
           const pc = isWhite(n.midi) ? COLORS.particleWhite : COLORS.particleBlack;
@@ -1069,6 +984,7 @@ export default function App(){
     }
   }
 
+  // 半音等間隔の鍵盤
   function drawKeyboardUniform(ctx, x, y, w, h, t, allNotes, minMidi, maxMidi, labelMode){
     const keyW = keyWidth(w);
 
@@ -1179,17 +1095,51 @@ export default function App(){
         <h1 className="text-2xl font-semibold">🎹 Falling Notes Piano – 視認性UP & 教育特化版</h1>
 
         <div className="bg-slate-800 rounded-2xl p-4 shadow space-y-3">
+          {/* 生成パラメータ（MVP） */}
           <div className="flex flex-wrap items-center gap-3">
             <label className="inline-block px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 cursor-pointer">
               Choose MIDI
               <input type="file" accept=".mid,.midi" className="hidden" onChange={onFile}/>
             </label>
 
+            <div className="flex items-center gap-2 text-sm">
+              <span className="opacity-80">Key</span>
+              <select className="bg-slate-700 rounded-md px-2 py-1" value={genKey} onChange={e=>setGenKey(e.target.value)}>
+                {["C","D","E","F","G","A","B"].map(k=><option key={k} value={k}>{k}</option>)}
+              </select>
+              <select className="bg-slate-700 rounded-md px-2 py-1" value={genScale} onChange={e=>setGenScale(e.target.value)}>
+                <option value="major">Major</option>
+                <option value="minor">Minor</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2 text-sm">
+              <span className="opacity-80">Tempo</span>
+              <input type="number" min={50} max={160} className="w-20 bg-slate-700 rounded-md px-2 py-1"
+                value={genTempo} onChange={e=>setGenTempo(parseInt(e.target.value||"90"))}/>
+              <span className="opacity-60 text-xs">bpm</span>
+            </div>
+
+            <div className="flex items-center gap-2 text-sm">
+              <span className="opacity-80">Bars</span>
+              <input type="number" min={2} max={32} className="w-20 bg-slate-700 rounded-md px-2 py-1"
+                value={genBars} onChange={e=>setGenBars(parseInt(e.target.value||"8"))}/>
+            </div>
+
+            <div className="flex items-center gap-2 text-sm">
+              <span className="opacity-80">難易度</span>
+              <select className="bg-slate-700 rounded-md px-2 py-1" value={genDifficulty} onChange={e=>setGenDifficulty(parseInt(e.target.value))}>
+                <option value={1}>やさしい</option>
+                <option value={2}>ふつう</option>
+                <option value={3}>むずかしい</option>
+              </select>
+            </div>
+
             <button
-              className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500"
+              className="ml-auto px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500"
               onClick={generateAndLoad}
             >
-              作曲（サンプル）
+              生成 → ロード
             </button>
 
             <button
@@ -1205,7 +1155,10 @@ export default function App(){
             >
               ライブラリ
             </button>
+          </div>
 
+          {/* 再生・表示系 */}
+          <div className="flex flex-wrap items-center gap-3 border-t border-slate-700 pt-3">
             <div className="text-sm opacity-80 truncate">{name || "No file loaded"}</div>
 
             <div className="ml-auto flex items-center gap-2 text-sm">
@@ -1241,57 +1194,6 @@ export default function App(){
                 <option value="rect">Rectangle</option>
                 <option value="star">⭐ Star</option>
                 <option value="heart">❤️ Heart</option>
-              </select>
-            </div>
-          </div>
-
-          {/* 生成パラメータ UI */}
-          <div className="flex flex-wrap items-center gap-3 border-t border-slate-700 pt-3 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="opacity-80">調</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={genKey}
-                onChange={(e)=>setGenKey(e.target.value)}>
-                {["C","D","E","F","G","A","B","Bb","Eb","F#"].map(k=><option key={k} value={k}>{k} major</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="opacity-80">テンポ</span>
-              <input type="number" min={60} max={140} step={5}
-                className="w-20 bg-slate-700 rounded-md px-2 py-1"
-                value={genTempo} onChange={e=>setGenTempo(clamp(parseInt(e.target.value||"0",10), 60, 140))}/>
-              <span>bpm</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="opacity-80">小節</span>
-              <input type="number" min={4} max={32} step={2}
-                className="w-20 bg-slate-700 rounded-md px-2 py-1"
-                value={genBars} onChange={e=>setGenBars(clamp(parseInt(e.target.value||"0",10),4,32))}/>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="opacity-80">密度</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={genDensity}
-                onChange={(e)=>setGenDensity(e.target.value)}>
-                <option value="low">少なめ</option>
-                <option value="mid">ふつう</option>
-                <option value="high">多め</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="opacity-80">同時発音</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={genMaxVoices}
-                onChange={(e)=>setGenMaxVoices(parseInt(e.target.value,10))}>
-                <option value={1}>1 声（右手）</option>
-                <option value={2}>2 声（右手に和音）</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="opacity-80">左手</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={leftHand}
-                onChange={(e)=>setLeftHand(e.target.value)}>
-                <option value="none">なし</option>
-                <option value="bass">単音ベース</option>
-                <option value="block">ブロック和音</option>
-                <option value="alberti">アルベルティ</option>
               </select>
             </div>
           </div>
@@ -1357,7 +1259,7 @@ export default function App(){
 
           <p className="text-xs opacity-70">
             🎯集中＝鍵盤発光＋落下ノートのみ／✨標準＝リップルのみ／🎉楽しさ＝光柱＆スパーク＋リップル。<br/>
-            Autoで楽曲に最適化された鍵盤表示。キー: 1=20% … 9=90%, 0=100%。
+            生成：Key/長短/テンポ/小節/難易度 を選んで「生成 → ロード」。キー: 1=20% … 9=90%, 0=100%。
           </p>
         </div>
       </div>
@@ -1376,14 +1278,7 @@ export default function App(){
                 <div key={item.id} className="flex items-center gap-2 bg-slate-700/60 rounded px-3 py-2">
                   <div className="flex-1">
                     <div className="font-medium">{item.name || "(無題)"}</div>
-                    <div className="text-xs opacity-70">
-                      {fmtDate(item.createdAt)}・{(item.size/1024).toFixed(1)} KB
-                      {item.settings && (
-                        <span className="ml-2 opacity-80">
-                          [{item.settings.key}/{item.settings.tempo}bpm/{item.settings.bars}bars/{item.settings.density}/{item.settings.maxVoices}v/LH:{item.settings.leftHand||"none"}]
-                        </span>
-                      )}
-                    </div>
+                    <div className="text-xs opacity-70">{fmtDate(item.createdAt)}・{(item.size/1024).toFixed(1)} KB</div>
                   </div>
                   <button className="px-2 py-1 bg-indigo-600 rounded hover:bg-indigo-500" onClick={()=>loadFromLibrary(item.id)}>読込</button>
                   <button className="px-2 py-1 bg-rose-700 rounded hover:bg-rose-600" onClick={()=>removeFromLibrary(item.id)}>削除</button>
