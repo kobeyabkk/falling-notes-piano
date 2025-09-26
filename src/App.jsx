@@ -1308,6 +1308,13 @@ export default function App(){
     ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
     : "bg-emerald-600/20 text-emerald-200 border border-emerald-500/40";
 
+  const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
+
+  const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
+  const onlineStatusClass = isOfflineMode
+    ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
+    : "bg-emerald-600/20 text-emerald-200 border border-emerald-500/40";
+
 
   return (
 
@@ -1393,7 +1400,9 @@ export default function App(){
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
                   <label
+
                     className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm"
+
                   >
                     Choose MIDI
                     <input
