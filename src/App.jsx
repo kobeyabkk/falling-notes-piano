@@ -725,15 +725,18 @@ export default function App(){
 
   // -------- transport --------
   async function play(){
-    await ensureAudioReady();
+
+    await ensureAudioReady?.();
+
     if(!audioReady){
       masterRef.current = new Tone.Gain(0.9).toDestination();
       busRef.current = new Tone.Gain(1).connect(masterRef.current);
       setAudioReady(true);
     }
     if(!notes.length) return;
-    if(!instReady || !instrumentRef.current?.inst){
-      alert("音源を読み込み中です。Synth に切り替えるとすぐに再生できます。");
+    const usingSynth = sound === "synth" || !instrumentRef.current?.inst;
+    if(!usingSynth && !instReady){
+      alert("外部音源を読み込み中です。準備完了後に再生できます。オフライン時はSynthをご利用ください。");
       return;
     }
     cancelRAF();
@@ -1303,13 +1306,6 @@ export default function App(){
   const progressRatio = totalDuration>0 ? Math.min(1, playhead/totalDuration) : 0;
   const progressPercent = Math.round(progressRatio*100);
   const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
-  const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
-  const onlineStatusClass = isOfflineMode
-    ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
-    : "bg-emerald-600/20 text-emerald-200 border border-emerald-500/40";
-
-  const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
-
   const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
   const onlineStatusClass = isOfflineMode
     ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
