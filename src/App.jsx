@@ -308,6 +308,7 @@ export default function App(){
     }
     setPrecacheState({ status: "running" });
     try {
+      await window.__fnpwa?.collectAssetHints?.();
       const essentials = [
         "/",
         "/index.html",
@@ -423,6 +424,7 @@ export default function App(){
 
   useEffect(() => {
     if (!devPanelOpen) return;
+    window.__fnpwa?.collectAssetHints?.();
     refreshCacheReport();
   }, [devPanelOpen, refreshCacheReport]);
 
