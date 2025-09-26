@@ -1288,6 +1288,11 @@ export default function App(){
   const totalDuration = Math.max(durationRef.current, isFinite(endTimeRef.current)?endTimeRef.current:0);
   const progressRatio = totalDuration>0 ? Math.min(1, playhead/totalDuration) : 0;
   const progressPercent = Math.round(progressRatio*100);
+  const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
+  const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
+  const onlineStatusClass = isOfflineMode
+    ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
+    : "bg-emerald-600/20 text-emerald-200 border border-emerald-500/40";
 
 
   return (
@@ -1298,6 +1303,20 @@ export default function App(){
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <h1 className="text-xl sm:text-2xl font-semibold leading-tight">🎹 Falling Notes Piano – 視認性UP & 教育特化版</h1>
             <div className="text-xs sm:text-sm text-slate-300 truncate">{name || "No file loaded"}</div>
+          </div>
+          <div className="flex items-center gap-2 text-xs sm:text-sm">
+            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full font-medium ${onlineStatusClass}`}>
+              {onlineStatusLabel}
+            </span>
+            {isOfflineMode ? (
+              <span className="text-[11px] sm:text-xs text-amber-200">
+                オフライン中は生成・外部音源・読み込み機能が自動停止します。
+              </span>
+            ) : (
+              <span className="text-[11px] sm:text-xs text-slate-400">
+                ネットワーク接続で生成・外部音源の利用が可能です。
+              </span>
+            )}
           </div>
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3">
@@ -1345,8 +1364,9 @@ export default function App(){
 
         <div className="space-y-5 pt-6">
           {isOfflineMode && (
-            <div className="text-sm text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-xl px-4 py-3">
-              現在オフラインです。外部音源と生成機能は一時的に無効になります。
+            <div className="text-sm text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-xl px-4 py-3 space-y-1">
+              <p>現在オフラインです。生成と外部音源は一時的に無効になります。</p>
+              <p className="text-xs text-amber-100/80">ローカルMIDIは読み込めます。生成と外部音源は無効です。</p>
             </div>
           )}
 
@@ -1358,9 +1378,16 @@ export default function App(){
             <div className="border-t border-slate-700/60 px-4 sm:px-6 py-4 space-y-4">
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
-                  <label className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm">
+                  <label
+                    className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm"
+                  >
                     Choose MIDI
-                    <input type="file" accept=".mid,.midi" className="hidden" onChange={onFile} />
+                    <input
+                      type="file"
+                      accept=".mid,.midi"
+                      className="hidden"
+                      onChange={onFile}
+                    />
                   </label>
 
                   <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
@@ -1423,6 +1450,7 @@ export default function App(){
                     className="w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
                     onClick={generateAndLoad}
                     disabled={isOfflineMode}
+                    title={offlineDisabledTooltip}
                   >
                     生成 → ロード
                   </button>
@@ -1474,6 +1502,7 @@ export default function App(){
                       value={sound}
                       onChange={e => setSound(e.target.value)}
                       disabled={isOfflineMode}
+                      title={offlineDisabledTooltip}
                     >
                       <option value="synth">Synth (軽量)</option>
                       <option value="piano">Piano</option>
@@ -1568,123 +1597,6 @@ export default function App(){
                 </div>
               </div>
 
-              <div className="border-t border-slate-700 pt-3 space-y-2 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">オフライン準備</span>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs ${offlineReady ? "bg-emerald-600/30 text-emerald-100" : "bg-amber-600/30 text-amber-100"}`}
-                  >
-                    {offlineReady ? "OK" : "未準備"}
-                  </span>
-                  {offlineStatusDetail?.missing?.length ? (
-                    <span className="text-xs text-amber-200">不足 {offlineStatusDetail.missing.length} 件</span>
-                  ) : (
-                    <span className="text-xs opacity-70">必須ファイルは取得済み</span>
-                  )}
-                  {offlineStatusDetail?.error && <span className="text-xs text-rose-300">{offlineStatusDetail.error}</span>}
-                  {swVersion && <span className="ml-auto text-xs opacity-70">SW {swVersion}</span>}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    className="min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={handleManualPrecache}
-                    disabled={precacheState.status === "running"}
-                  >
-                    オフライン準備を手動実行
-                  </button>
-                  {precacheState.status === "running" && <span className="text-xs text-amber-200">キャッシュ中…</span>}
-                  {precacheState.status === "done" && (
-                    <span className="text-xs text-emerald-300">
-                      完了 ({precacheState.detail?.cached ?? 0}/{precacheState.detail?.total ?? 0})
-                    </span>
-                  )}
-                  {precacheState.status === "error" && <span className="text-xs text-rose-300">失敗しました</span>}
-                </div>
-
-                <div className="text-xs">
-                  <button className="underline decoration-dotted" onClick={() => setDevPanelOpen(v => !v)}>
-                    開発者メニューを{devPanelOpen ? "閉じる" : "開く"}
-                  </button>
-                </div>
-
-                {devPanelOpen && (
-                  <div className="space-y-3 rounded-2xl bg-slate-900/40 p-3 text-xs">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button className="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600" onClick={refreshCacheReport}>
-                        再読込
-                      </button>
-                      <button
-                        className="px-3 py-2 rounded bg-rose-700 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={handlePurgeCaches}
-                        disabled={purgeState?.status === "running"}
-                      >
-                        キャッシュ全削除
-                      </button>
-                      {purgeState?.status === "running" && <span className="text-amber-200">削除中…</span>}
-                      {purgeState?.status === "done" && (
-                        <span className="text-emerald-300">削除完了 ({purgeState.detail?.deleted ?? 0})</span>
-                      )}
-                      {purgeState?.status === "error" && <span className="text-rose-300">削除失敗</span>}
-                    </div>
-
-                    {cacheError && <div className="text-rose-300">キャッシュ取得に失敗しました: {cacheError}</div>}
-
-                    <div className="space-y-2 max-h-60 overflow-auto pr-1">
-                      {cacheReport.length === 0 && !cacheError && <div className="opacity-70">キャッシュは存在しません。</div>}
-                      {cacheReport.map(cache => (
-                        <div key={cache.name} className="rounded-xl bg-slate-800/70 p-2 space-y-1">
-                          <div className="font-semibold">{cache.name}</div>
-                          <div className="text-[11px] opacity-70">{cache.humanTotal} / {cache.entries.length} items</div>
-                          <ul className="space-y-1 max-h-28 overflow-auto pr-1">
-                            {cache.entries.map(entry => {
-                              let label = entry.url;
-                              if (typeof window !== "undefined") {
-                                try {
-                                  const parsed = new URL(entry.url);
-                                  label = parsed.pathname + parsed.search;
-                                } catch {}
-                              }
-                              return (
-                                <li key={entry.url} className="flex items-center gap-2 text-[11px]">
-                                  <span className="flex-1 truncate">{label}</span>
-                                  <span className="opacity-70 whitespace-nowrap">{entry.humanSize}</span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      ))}
-                    </div>
-
-                    {offlineStatusDetail?.missing?.length > 0 && (
-                      <div>
-                        <div className="font-semibold">不足中の必須ファイル</div>
-                        <ul className="list-disc list-inside space-y-1">
-                          {offlineStatusDetail.missing.map(item => (
-                            <li key={item} className="opacity-80">
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {offlineStatusDetail?.uncachedHints?.length > 0 && (
-                      <div>
-                        <div className="font-semibold">未キャッシュのアセット候補</div>
-                        <ul className="list-disc list-inside space-y-1">
-                          {offlineStatusDetail.uncachedHints.map(item => (
-                            <li key={item} className="opacity-80">
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           </details>
 
