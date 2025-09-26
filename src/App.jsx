@@ -1288,6 +1288,11 @@ export default function App(){
   const totalDuration = Math.max(durationRef.current, isFinite(endTimeRef.current)?endTimeRef.current:0);
   const progressRatio = totalDuration>0 ? Math.min(1, playhead/totalDuration) : 0;
   const progressPercent = Math.round(progressRatio*100);
+  const offlineDisabledTooltip = isOfflineMode ? "オフラインでは使えません" : undefined;
+  const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
+  const onlineStatusClass = isOfflineMode
+    ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
+    : "bg-emerald-600/20 text-emerald-200 border border-emerald-500/40";
 
 
   return (
@@ -1298,6 +1303,20 @@ export default function App(){
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <h1 className="text-xl sm:text-2xl font-semibold leading-tight">🎹 Falling Notes Piano – 視認性UP & 教育特化版</h1>
             <div className="text-xs sm:text-sm text-slate-300 truncate">{name || "No file loaded"}</div>
+          </div>
+          <div className="flex items-center gap-2 text-xs sm:text-sm">
+            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full font-medium ${onlineStatusClass}`}>
+              {onlineStatusLabel}
+            </span>
+            {isOfflineMode ? (
+              <span className="text-[11px] sm:text-xs text-amber-200">
+                オフライン中は生成・外部音源・読み込み機能が自動停止します。
+              </span>
+            ) : (
+              <span className="text-[11px] sm:text-xs text-slate-400">
+                ネットワーク接続で生成・外部音源の利用が可能です。
+              </span>
+            )}
           </div>
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3">
@@ -1358,9 +1377,23 @@ export default function App(){
             <div className="border-t border-slate-700/60 px-4 sm:px-6 py-4 space-y-4">
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
-                  <label className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm">
+                  <label
+                    className={`inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl transition shadow-sm ${
+                      isOfflineMode
+                        ? "bg-slate-700 opacity-60 cursor-not-allowed"
+                        : "bg-slate-700 hover:bg-slate-600 cursor-pointer"
+                    }`}
+                    title={offlineDisabledTooltip}
+                    aria-disabled={isOfflineMode}
+                  >
                     Choose MIDI
-                    <input type="file" accept=".mid,.midi" className="hidden" onChange={onFile} />
+                    <input
+                      type="file"
+                      accept=".mid,.midi"
+                      className="hidden"
+                      onChange={onFile}
+                      disabled={isOfflineMode}
+                    />
                   </label>
 
                   <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
@@ -1423,6 +1456,7 @@ export default function App(){
                     className="w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
                     onClick={generateAndLoad}
                     disabled={isOfflineMode}
+                    title={offlineDisabledTooltip}
                   >
                     生成 → ロード
                   </button>
@@ -1474,6 +1508,7 @@ export default function App(){
                       value={sound}
                       onChange={e => setSound(e.target.value)}
                       disabled={isOfflineMode}
+                      title={offlineDisabledTooltip}
                     >
                       <option value="synth">Synth (軽量)</option>
                       <option value="piano">Piano</option>
