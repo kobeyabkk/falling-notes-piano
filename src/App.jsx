@@ -261,6 +261,15 @@ export default function App(){
   const busRef = useRef(null);
   const instrumentRef = useRef(null);
 
+  async function ensureAudioReady() {
+    try {
+      await Tone.start();
+      await Tone.context.resume?.();
+    } catch (e) {
+      console.warn("[audio] resume failed", e);
+    }
+  }
+
   // hit state
   const keyFlashRef = useRef(new Map()); // midi -> until(sec)
   const landedAtRef = useRef(new Map()); // noteId -> t
@@ -716,12 +725,17 @@ export default function App(){
 
   // -------- transport --------
   async function play(){
+    await ensureAudioReady();
+    if(!audioReady){
+      masterRef.current = new Tone.Gain(0.9).toDestination();
+      busRef.current = new Tone.Gain(1).connect(masterRef.current);
+      setAudioReady(true);
+    }
     if(!notes.length) return;
     if(!instReady || !instrumentRef.current?.inst){
       alert("音源を読み込み中です。Synth に切り替えるとすぐに再生できます。");
       return;
     }
-    await Tone.start();
     cancelRAF();
 
     // 再生開始時に visualEnd を再計算（高さ未確定対策）
@@ -1288,6 +1302,11 @@ export default function App(){
   const totalDuration = Math.max(durationRef.current, isFinite(endTimeRef.current)?endTimeRef.current:0);
   const progressRatio = totalDuration>0 ? Math.min(1, playhead/totalDuration) : 0;
   const progressPercent = Math.round(progressRatio*100);
+  const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
+  const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
+  const onlineStatusClass = isOfflineMode
+    ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
+    : "bg-emerald-600/20 text-emerald-200 border border-emerald-500/40";
 
   const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
 
@@ -1324,7 +1343,7 @@ export default function App(){
             <div className="flex flex-wrap items-center gap-3">
               <button
                 className="flex-1 sm:flex-none min-h-[44px] px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
-                disabled={!notes.length || isPlaying || !instReady}
+                disabled={!notes.length || isPlaying}
                 onClick={play}
               >
                 Play
@@ -1391,7 +1410,6 @@ export default function App(){
                       accept=".mid,.midi"
                       className="hidden"
                       onChange={onFile}
-
                     />
                   </label>
 
