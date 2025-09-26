@@ -1288,7 +1288,9 @@ export default function App(){
   const totalDuration = Math.max(durationRef.current, isFinite(endTimeRef.current)?endTimeRef.current:0);
   const progressRatio = totalDuration>0 ? Math.min(1, playhead/totalDuration) : 0;
   const progressPercent = Math.round(progressRatio*100);
+
   const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
+
   const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
   const onlineStatusClass = isOfflineMode
     ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
@@ -1379,7 +1381,9 @@ export default function App(){
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
                   <label
+
                     className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm"
+
                   >
                     Choose MIDI
                     <input
@@ -1387,6 +1391,7 @@ export default function App(){
                       accept=".mid,.midi"
                       className="hidden"
                       onChange={onFile}
+
                     />
                   </label>
 
