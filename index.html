@@ -1,12 +1,254 @@
 <!doctype html>
-<html>
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b1219" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>Falling Notes Piano</title>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function () {
+        "use strict";
+        const global = window;
+        const state = (global.__fnpwa = global.__fnpwa || {});
+        const emit = (type, detail) => window.dispatchEvent(new CustomEvent(type, { detail }));
+        state.emit = emit;
+
+        function collectAssetHints() {
+          try {
+            const urls = new Set(state.assetHints || []);
+            const push = (value) => {
+              if (!value) return;
+              try {
+                const url = new URL(value, window.location.href);
+                if (url.origin === window.location.origin && url.pathname.startsWith("/assets/")) {
+                  urls.add(url.pathname + url.search);
+                }
+              } catch (err) {
+                console.warn("[FNPWA] asset hint parse failed", value, err);
+              }
+            };
+            document.querySelectorAll('link[href]').forEach((el) => push(el.getAttribute('href')));
+            document.querySelectorAll('script[src]').forEach((el) => push(el.getAttribute('src')));
+            state.assetHints = Array.from(urls);
+            emit("fnpwa:asset-hints", { urls: state.assetHints });
+          } catch (err) {
+            console.warn("[FNPWA] collectAssetHints error", err);
+          }
+        }
+
+        state.assetHints = state.assetHints || [];
+        state.collectAssetHints = collectAssetHints;
+        if (document.readyState === "complete" || document.readyState === "interactive") {
+          collectAssetHints();
+        } else {
+          document.addEventListener("DOMContentLoaded", collectAssetHints, { once: true });
+        }
+        window.addEventListener("load", collectAssetHints);
+
+        function bytesToHuman(bytes) {
+          if (!bytes) return "0 B";
+          const units = ["B", "KB", "MB", "GB"];
+          let idx = 0;
+          let value = bytes;
+          while (value >= 1024 && idx < units.length - 1) {
+            value /= 1024;
+            idx += 1;
+          }
+          return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+        }
+
+        async function listCaches() {
+          if (!("caches" in window)) {
+            return [];
+          }
+          const keys = await caches.keys();
+          const results = [];
+          for (const name of keys) {
+            const cache = await caches.open(name);
+            const requests = await cache.keys();
+            const entries = [];
+            let total = 0;
+            for (const request of requests) {
+              const response = await cache.match(request);
+              let size = 0;
+              if (response) {
+                const len = response.headers.get("content-length");
+                if (len) {
+                  size = Number(len);
+                } else {
+                  const buffer = await response.clone().arrayBuffer();
+                  size = buffer.byteLength;
+                }
+              }
+              total += size;
+              entries.push({ url: request.url, size, humanSize: bytesToHuman(size) });
+            }
+            results.push({ name, entries, total, humanTotal: bytesToHuman(total) });
+          }
+          return results;
+        }
+
+        async function purgeAllCaches() {
+          if (!("caches" in window)) {
+            return { deleted: 0 };
+          }
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+          return { deleted: keys.length };
+        }
+
+        async function checkOfflineReady() {
+          if (!("caches" in window)) {
+            return { ok: false, reason: "unsupported" };
+          }
+          const keys = await caches.keys();
+          const active = keys
+            .filter((k) => k.startsWith("fnp-static-"))
+            .sort()
+            .reverse()[0];
+          if (!active) {
+            return { ok: false, reason: "cache-missing" };
+          }
+          const cache = await caches.open(active);
+          const essentials = [
+            "/",
+            "/index.html",
+            "/manifest.webmanifest",
+            "/icons/icon-192.png",
+            "/icons/icon-512.png",
+            "/icons/maskable-512.png",
+          ];
+          const missing = [];
+          for (const url of essentials) {
+            const hit = await cache.match(url, { ignoreSearch: true, ignoreVary: true });
+            if (!hit) {
+              missing.push(url);
+            }
+          }
+          const assetHints = state.assetHints || [];
+          const cachedHints = [];
+          const uncachedHints = [];
+          for (const asset of assetHints) {
+            const hit = await cache.match(asset);
+            if (hit) cachedHints.push(asset);
+            else uncachedHints.push(asset);
+          }
+          return {
+            ok: missing.length === 0,
+            cacheName: active,
+            missing,
+            essentials,
+            cachedHints,
+            uncachedHints,
+          };
+        }
+
+        async function requestResponse(message) {
+          if (!("serviceWorker" in navigator)) {
+            throw new Error("service worker unsupported");
+          }
+          const target = navigator.serviceWorker.controller || state.registration?.active || state.registration?.waiting;
+          if (!target) {
+            throw new Error("no-active-worker");
+          }
+          return new Promise((resolve, reject) => {
+            const channel = new MessageChannel();
+            const timer = setTimeout(() => {
+              channel.port1.onmessage = null;
+              reject(new Error("sw-timeout"));
+            }, 15000);
+            channel.port1.onmessage = (event) => {
+              clearTimeout(timer);
+              resolve(event.data);
+            };
+            try {
+              target.postMessage(message, [channel.port2]);
+            } catch (err) {
+              clearTimeout(timer);
+              reject(err);
+            }
+          });
+        }
+
+        state.debug = {
+          listCaches,
+          purgeAll: purgeAllCaches,
+          swInfo: async () => {
+            try {
+              const response = await requestResponse({ type: "PING_VERSION" });
+              return response;
+            } catch (err) {
+              return { error: String(err) };
+            }
+          },
+        };
+
+        state.checkOfflineReady = checkOfflineReady;
+        state.precache = async (urls) => {
+          const response = await requestResponse({ type: "PRECACHE_URLS", urls });
+          return response?.result || response;
+        };
+        state.requestOfflineStatus = async () => {
+          const response = await requestResponse({ type: "OFFLINE_STATUS_REQUEST" });
+          return response?.status || response;
+        };
+        state.applyUpdate = () => {
+          const waiting = state.registration?.waiting || state.waiting;
+          if (waiting) {
+            waiting.postMessage({ type: "SKIP_WAITING" });
+          }
+        };
+
+        if ("serviceWorker" in navigator) {
+          const params = new URL(window.location.href).searchParams;
+          const forced = params.get("v");
+          const swTag = forced && forced.toLowerCase().startsWith("sw") ? forced : "v1.1.0";
+          const swUrl = `/sw.js?v=${encodeURIComponent(swTag)}`;
+
+          navigator.serviceWorker
+            .register(swUrl)
+            .then((registration) => {
+              state.registration = registration;
+              emit("fnpwa:sw-registered", { registration });
+
+              if (registration.waiting) {
+                state.waiting = registration.waiting;
+                emit("fnpwa:sw-waiting", { registration });
+              }
+
+              registration.addEventListener("updatefound", () => {
+                emit("fnpwa:sw-updatefound", { registration });
+                const newWorker = registration.installing;
+                if (!newWorker) return;
+                newWorker.addEventListener("statechange", () => {
+                  emit("fnpwa:sw-state", { state: newWorker.state });
+                  if (newWorker.state === "installed") {
+                    if (navigator.serviceWorker.controller) {
+                      state.waiting = registration.waiting;
+                      emit("fnpwa:sw-waiting", { registration });
+                    } else {
+                      emit("fnpwa:sw-cached", { registration });
+                    }
+                  }
+                });
+              });
+            })
+            .catch((err) => {
+              console.error("[FNPWA] service worker register failed", err);
+              emit("fnpwa:sw-error", { error: String(err) });
+            });
+
+          navigator.serviceWorker.addEventListener("message", (event) => {
+            emit("fnpwa:sw-message", event.data);
+          });
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
