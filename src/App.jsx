@@ -1,5 +1,5 @@
 // App.jsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
 import { Midi } from "@tonejs/midi";
 import { listSongs, saveSong, loadSongBytes, removeSong } from "./db";
@@ -219,6 +219,23 @@ export default function App(){
   const [libOpen, setLibOpen] = useState(false);
   const [libItems, setLibItems] = useState([]);
 
+  // offline / diagnostics
+  const [isOfflineMode, setIsOfflineMode] = useState(
+    typeof navigator !== "undefined" ? !navigator.onLine : false
+  );
+  const [offlineReady, setOfflineReady] = useState(false);
+  const [offlineStatusDetail, setOfflineStatusDetail] = useState(null);
+  const [precacheState, setPrecacheState] = useState({ status: "idle" });
+  const [updateToast, setUpdateToast] = useState(null);
+  const [swVersion, setSwVersion] = useState(null);
+  const [devPanelOpen, setDevPanelOpen] = useState(false);
+  const [cacheReport, setCacheReport] = useState([]);
+  const [purgeState, setPurgeState] = useState(null);
+  const [cacheError, setCacheError] = useState(null);
+  const controllerSeenRef = useRef(
+    typeof navigator !== "undefined" ? Boolean(navigator.serviceWorker?.controller) : false
+  );
+
   // 可視窓
   const noteStartsRef = useRef([]);
   const lowerBound = (arr, x) => {
@@ -255,8 +272,178 @@ export default function App(){
   const aurasRef = useRef([]);
   const bgIntensityRef = useRef(0);
 
+  const refreshOfflineStatus = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    try {
+      const status = await window.__fnpwa?.checkOfflineReady?.();
+      if (status) {
+        setOfflineReady(Boolean(status.ok));
+        setOfflineStatusDetail(status);
+      }
+    } catch (err) {
+      console.warn("[FNPWA] checkOfflineReady failed", err);
+      setOfflineReady(false);
+      setOfflineStatusDetail({ ok: false, error: String(err) });
+    }
+  }, []);
+
+  const refreshCacheReport = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    try {
+      const report = await window.__fnpwa?.debug?.listCaches?.();
+      if (report) {
+        setCacheReport(report);
+        setCacheError(null);
+      }
+    } catch (err) {
+      console.warn("[FNPWA] listCaches failed", err);
+      setCacheReport([]);
+      setCacheError(String(err));
+    }
+  }, []);
+
+  const handleManualPrecache = useCallback(async () => {
+    if (typeof window === "undefined" || !window.__fnpwa?.precache) {
+      return;
+    }
+    setPrecacheState({ status: "running" });
+    try {
+      const essentials = [
+        "/",
+        "/index.html",
+        "/manifest.webmanifest",
+        "/icons/icon-192.png",
+        "/icons/icon-512.png",
+        "/icons/maskable-512.png",
+      ];
+      const assetHints = window.__fnpwa?.assetHints || [];
+      const result = await window.__fnpwa.precache([...essentials, ...assetHints]);
+      setPrecacheState({ status: result?.ok ? "done" : "error", detail: result });
+    } catch (err) {
+      setPrecacheState({ status: "error", detail: { error: String(err) } });
+    }
+    await refreshOfflineStatus();
+    await refreshCacheReport();
+  }, [refreshCacheReport, refreshOfflineStatus]);
+
+  const handlePurgeCaches = useCallback(async () => {
+    if (typeof window === "undefined" || !window.__fnpwa?.debug?.purgeAll) {
+      return;
+    }
+    setPurgeState({ status: "running" });
+    try {
+      const result = await window.__fnpwa.debug.purgeAll();
+      setPurgeState({ status: "done", detail: result });
+    } catch (err) {
+      setPurgeState({ status: "error", detail: { error: String(err) } });
+    }
+    await refreshOfflineStatus();
+    await refreshCacheReport();
+  }, [refreshCacheReport, refreshOfflineStatus]);
+
+  const handleUpdateNow = useCallback(() => {
+    if (typeof window === "undefined") return;
+    setUpdateToast({ status: "applying" });
+    window.__fnpwa?.applyUpdate?.();
+  }, []);
+
+  const dismissUpdateToast = useCallback(() => {
+    setUpdateToast(null);
+  }, []);
+
   // size cache
   const canvasSizeRef = useRef({ W:0, H:0 });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setIsOfflineMode(!navigator.onLine);
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+    (async () => {
+      await refreshOfflineStatus();
+      const info = await window.__fnpwa?.debug?.swInfo?.();
+      if (!cancelled && info?.version) {
+        setSwVersion(info.version);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshOfflineStatus]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onWaiting = () => setUpdateToast({ status: "ready" });
+    const onRegistered = () => {
+      window.__fnpwa?.requestOfflineStatus?.().catch(() => {});
+    };
+    const onAssetHints = () => {
+      if (devPanelOpen) refreshCacheReport();
+    };
+    const onMessage = (event) => {
+      const payload = event.detail;
+      if (!payload) return;
+      if (payload.type === "OFFLINE_STATUS") {
+        if (payload.status) {
+          setOfflineReady(Boolean(payload.status.ok));
+          setOfflineStatusDetail(payload.status);
+          if (payload.status.version) setSwVersion(payload.status.version);
+        }
+      } else if (payload.type === "PRECACHE_RESULT") {
+        const result = payload.result || payload;
+        setPrecacheState({ status: result?.ok ? "done" : "error", detail: result });
+        refreshOfflineStatus();
+        refreshCacheReport();
+      } else if (payload.type === "SW_VERSION") {
+        if (payload.version) setSwVersion(payload.version);
+      }
+    };
+
+    window.addEventListener("fnpwa:sw-waiting", onWaiting);
+    window.addEventListener("fnpwa:sw-registered", onRegistered);
+    window.addEventListener("fnpwa:asset-hints", onAssetHints);
+    window.addEventListener("fnpwa:sw-message", onMessage);
+    return () => {
+      window.removeEventListener("fnpwa:sw-waiting", onWaiting);
+      window.removeEventListener("fnpwa:sw-registered", onRegistered);
+      window.removeEventListener("fnpwa:asset-hints", onAssetHints);
+      window.removeEventListener("fnpwa:sw-message", onMessage);
+    };
+  }, [devPanelOpen, refreshCacheReport, refreshOfflineStatus]);
+
+  useEffect(() => {
+    if (!devPanelOpen) return;
+    refreshCacheReport();
+  }, [devPanelOpen, refreshCacheReport]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      if (!controllerSeenRef.current) {
+        controllerSeenRef.current = true;
+        return;
+      }
+      window.location.reload();
+    };
+    window.addEventListener("fnpwa:controllerchange", handler);
+    return () => window.removeEventListener("fnpwa:controllerchange", handler);
+  }, []);
+
+  useEffect(() => {
+    if (!isOfflineMode) {
+      refreshOfflineStatus();
+    }
+  }, [isOfflineMode, refreshOfflineStatus]);
 
   // ====== 初期化：バスのみ作成 ======
   useEffect(()=>{
@@ -276,6 +463,10 @@ export default function App(){
   // ====== 楽器の生成/切替 ======
   useEffect(()=>{
     if(!audioReady || !busRef.current) return;
+    if(isOfflineMode && sound !== "synth"){
+      setSound("synth");
+      return;
+    }
     (async()=>{
       setSoundLoading(true);
       setInstReady(false);
@@ -297,7 +488,7 @@ export default function App(){
         }
       }
     })();
-  },[sound, audioReady]);
+  },[sound, audioReady, isOfflineMode]);
 
   // ショートカット（8は85%）
   useEffect(()=>{
@@ -1093,6 +1284,11 @@ export default function App(){
     <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
       <div className="max-w-5xl mx-auto space-y-4">
         <h1 className="text-2xl font-semibold">🎹 Falling Notes Piano – 視認性UP & 教育特化版</h1>
+        {isOfflineMode && (
+          <div className="text-sm text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-xl px-3 py-2">
+            現在オフラインです。外部音源と生成機能は一時的に無効になります。
+          </div>
+        )}
 
         <div className="bg-slate-800 rounded-2xl p-4 shadow space-y-3">
           {/* 生成パラメータ（MVP） */}
@@ -1136,8 +1332,9 @@ export default function App(){
             </div>
 
             <button
-              className="ml-auto px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500"
+              className="ml-auto px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={generateAndLoad}
+              disabled={isOfflineMode}
             >
               生成 → ロード
             </button>
@@ -1155,6 +1352,11 @@ export default function App(){
             >
               ライブラリ
             </button>
+            {isOfflineMode && (
+              <div className="basis-full text-xs text-amber-200">
+                オフライン中は生成と外部音源の読み込みは行えません。オンラインに戻ると自動で再開します。
+              </div>
+            )}
           </div>
 
           {/* 再生・表示系 */}
@@ -1173,8 +1375,9 @@ export default function App(){
 
             <div className="flex items-center gap-2 text-sm">
               <span className="opacity-80">Sound</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={sound}
-                onChange={(e)=>setSound(e.target.value)}>
+              <select className="bg-slate-700 rounded-md px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed" value={sound}
+                onChange={(e)=>setSound(e.target.value)}
+                disabled={isOfflineMode}>
                 <option value="synth">Synth (軽量)</option>
                 <option value="piano">Piano</option>
                 <option value="piano-bright">Piano (Bright)</option>
@@ -1185,6 +1388,9 @@ export default function App(){
                   ? <span className="text-xs opacity-70">ready</span>
                   : <span className="text-xs opacity-70">initializing…</span>
               }
+              {isOfflineMode && (
+                <span className="text-xs text-amber-200">オフライン中はSynthのみ利用できます</span>
+              )}
             </div>
 
             <div className="flex items-center gap-2 text-sm">
@@ -1261,6 +1467,141 @@ export default function App(){
             🎯集中＝鍵盤発光＋落下ノートのみ／✨標準＝リップルのみ／🎉楽しさ＝光柱＆スパーク＋リップル。<br/>
             生成：Key/長短/テンポ/小節/難易度 を選んで「生成 → ロード」。キー: 1=20% … 9=90%, 0=100%。
           </p>
+          <div className="border-t border-slate-700 pt-3 space-y-2 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">オフライン準備</span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-xs ${offlineReady ? "bg-emerald-600/30 text-emerald-100" : "bg-amber-600/30 text-amber-100"}`}
+              >
+                {offlineReady ? "OK" : "未準備"}
+              </span>
+              {offlineStatusDetail?.missing?.length ? (
+                <span className="text-xs text-amber-200">不足 {offlineStatusDetail.missing.length} 件</span>
+              ) : (
+                <span className="text-xs opacity-70">必須ファイルは取得済み</span>
+              )}
+              {offlineStatusDetail?.error && (
+                <span className="text-xs text-rose-300">{offlineStatusDetail.error}</span>
+              )}
+              {swVersion && (
+                <span className="ml-auto text-xs opacity-70">SW {swVersion}</span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleManualPrecache}
+                disabled={precacheState.status === "running"}
+              >
+                オフライン準備を手動実行
+              </button>
+              {precacheState.status === "running" && (
+                <span className="text-xs text-amber-200">キャッシュ中…</span>
+              )}
+              {precacheState.status === "done" && (
+                <span className="text-xs text-emerald-300">
+                  完了 ({precacheState.detail?.cached ?? 0}/{precacheState.detail?.total ?? 0})
+                </span>
+              )}
+              {precacheState.status === "error" && (
+                <span className="text-xs text-rose-300">失敗しました</span>
+              )}
+            </div>
+
+            <div className="text-xs">
+              <button
+                className="underline decoration-dotted"
+                onClick={()=>setDevPanelOpen(v=>!v)}
+              >
+                開発者メニューを{devPanelOpen ? "閉じる" : "開く"}
+              </button>
+            </div>
+
+            {devPanelOpen && (
+              <div className="space-y-3 rounded-2xl bg-slate-900/40 p-3 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"
+                    onClick={refreshCacheReport}
+                  >
+                    再読込
+                  </button>
+                  <button
+                    className="px-2 py-1 rounded bg-rose-700 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handlePurgeCaches}
+                    disabled={purgeState?.status === "running"}
+                  >
+                    キャッシュ全削除
+                  </button>
+                  {purgeState?.status === "running" && (
+                    <span className="text-amber-200">削除中…</span>
+                  )}
+                  {purgeState?.status === "done" && (
+                    <span className="text-emerald-300">削除完了 ({purgeState.detail?.deleted ?? 0})</span>
+                  )}
+                  {purgeState?.status === "error" && (
+                    <span className="text-rose-300">削除失敗</span>
+                  )}
+                </div>
+
+                {cacheError && (
+                  <div className="text-rose-300">キャッシュ取得に失敗しました: {cacheError}</div>
+                )}
+
+                <div className="space-y-2 max-h-60 overflow-auto pr-1">
+                  {cacheReport.length === 0 && !cacheError && (
+                    <div className="opacity-70">キャッシュは存在しません。</div>
+                  )}
+                  {cacheReport.map((cache) => (
+                    <div key={cache.name} className="rounded-xl bg-slate-800/70 p-2 space-y-1">
+                      <div className="font-semibold">{cache.name}</div>
+                      <div className="text-[11px] opacity-70">{cache.humanTotal} / {cache.entries.length} items</div>
+                      <ul className="space-y-1 max-h-28 overflow-auto pr-1">
+                        {cache.entries.map((entry) => {
+                          let label = entry.url;
+                          if (typeof window !== "undefined") {
+                            try {
+                              const parsed = new URL(entry.url);
+                              label = parsed.pathname + parsed.search;
+                            } catch {}
+                          }
+                          return (
+                            <li key={entry.url} className="flex items-center gap-2 text-[11px]">
+                              <span className="flex-1 truncate">{label}</span>
+                              <span className="opacity-70 whitespace-nowrap">{entry.humanSize}</span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+
+                {offlineStatusDetail?.missing?.length > 0 && (
+                  <div>
+                    <div className="font-semibold">不足中の必須ファイル</div>
+                    <ul className="list-disc list-inside space-y-1">
+                      {offlineStatusDetail.missing.map((item) => (
+                        <li key={item} className="opacity-80">{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {offlineStatusDetail?.uncachedHints?.length > 0 && (
+                  <div>
+                    <div className="font-semibold">未キャッシュのアセット候補</div>
+                    <ul className="list-disc list-inside space-y-1">
+                      {offlineStatusDetail.uncachedHints.map((item) => (
+                        <li key={item} className="opacity-80">{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1288,6 +1629,36 @@ export default function App(){
             <div className="mt-3 text-right">
               <button className="px-3 py-2 bg-slate-700 rounded" onClick={()=>setLibOpen(false)}>閉じる</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {updateToast && (
+        <div className="fixed inset-x-0 bottom-4 z-50 px-4 flex justify-center">
+          <div className="bg-slate-900/95 border border-slate-700 text-slate-100 rounded-2xl px-4 py-3 shadow-xl flex flex-wrap items-center gap-3 max-w-xl w-full">
+            <div className="flex-1 text-sm">
+              {updateToast.status === "applying"
+                ? "更新を適用中です…数秒お待ちください。"
+                : "新しいバージョンがあります。更新しますか？"}
+            </div>
+            {updateToast.status === "applying" ? (
+              <span className="text-xs opacity-70">反映中…</span>
+            ) : (
+              <>
+                <button
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500"
+                  onClick={handleUpdateNow}
+                >
+                  今すぐ更新
+                </button>
+                <button
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600"
+                  onClick={dismissUpdateToast}
+                >
+                  あとで
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

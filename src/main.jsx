@@ -11,6 +11,30 @@ createRoot(container).render(
   </StrictMode>
 );
 
+if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+  let initialControllerHandled = false;
+  const emit = window.__fnpwa?.emit;
+  const dispatch = (detail) => {
+    if (typeof emit === "function") {
+      emit("fnpwa:controllerchange", detail);
+    } else {
+      window.dispatchEvent(new CustomEvent("fnpwa:controllerchange", { detail }));
+    }
+  };
+
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    const detail = { controller: navigator.serviceWorker.controller };
+    dispatch(detail);
+    if (!initialControllerHandled) {
+      initialControllerHandled = true;
+    }
+  });
+
+  navigator.serviceWorker.ready
+    .then(() => window.__fnpwa?.requestOfflineStatus?.())
+    .catch(() => {});
+}
+
 /*
   ※ SW（サービスワーカー）の登録は index.html 側で実行しています。
      main.jsx では登録しません（重複を避けるため）。
