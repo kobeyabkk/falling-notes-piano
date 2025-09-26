@@ -308,6 +308,9 @@ export default function App(){
     }
     setPrecacheState({ status: "running" });
     try {
+
+      await window.__fnpwa?.collectAssetHints?.();
+
       const essentials = [
         "/",
         "/index.html",
@@ -423,6 +426,9 @@ export default function App(){
 
   useEffect(() => {
     if (!devPanelOpen) return;
+
+    window.__fnpwa?.collectAssetHints?.();
+
     refreshCacheReport();
   }, [devPanelOpen, refreshCacheReport]);
 
@@ -1279,192 +1285,415 @@ export default function App(){
   const fmt = (sec)=>{ const s=Math.max(0, sec|0); const m=(s/60)|0; const r=(s%60).toString().padStart(2,"0"); return `${m}:${r}`; };
   const speedOptions = [0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.85,0.9,1.0];
   const fmtDate = (ts)=>new Date(ts).toLocaleString();
+  const totalDuration = Math.max(durationRef.current, isFinite(endTimeRef.current)?endTimeRef.current:0);
+  const progressRatio = totalDuration>0 ? Math.min(1, playhead/totalDuration) : 0;
+  const progressPercent = Math.round(progressRatio*100);
+
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
-      <div className="max-w-5xl mx-auto space-y-4">
-        <h1 className="text-2xl font-semibold">🎹 Falling Notes Piano – 視認性UP & 教育特化版</h1>
-        {isOfflineMode && (
-          <div className="text-sm text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-xl px-3 py-2">
-            現在オフラインです。外部音源と生成機能は一時的に無効になります。
+
+    <div className="min-h-screen bg-slate-900 text-slate-100">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pb-16">
+        <div className="sticky top-0 z-30 -mx-4 sm:-mx-6 px-4 sm:px-6 pt-6 pb-4 space-y-4 bg-slate-900/95 backdrop-blur border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <h1 className="text-xl sm:text-2xl font-semibold leading-tight">🎹 Falling Notes Piano – 視認性UP & 教育特化版</h1>
+            <div className="text-xs sm:text-sm text-slate-300 truncate">{name || "No file loaded"}</div>
           </div>
-        )}
-
-        <div className="bg-slate-800 rounded-2xl p-4 shadow space-y-3">
-          {/* 生成パラメータ（MVP） */}
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="inline-block px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 cursor-pointer">
-              Choose MIDI
-              <input type="file" accept=".mid,.midi" className="hidden" onChange={onFile}/>
-            </label>
-
-            <div className="flex items-center gap-2 text-sm">
-              <span className="opacity-80">Key</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={genKey} onChange={e=>setGenKey(e.target.value)}>
-                {["C","D","E","F","G","A","B"].map(k=><option key={k} value={k}>{k}</option>)}
-              </select>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={genScale} onChange={e=>setGenScale(e.target.value)}>
-                <option value="major">Major</option>
-                <option value="minor">Minor</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2 text-sm">
-              <span className="opacity-80">Tempo</span>
-              <input type="number" min={50} max={160} className="w-20 bg-slate-700 rounded-md px-2 py-1"
-                value={genTempo} onChange={e=>setGenTempo(parseInt(e.target.value||"90"))}/>
-              <span className="opacity-60 text-xs">bpm</span>
-            </div>
-
-            <div className="flex items-center gap-2 text-sm">
-              <span className="opacity-80">Bars</span>
-              <input type="number" min={2} max={32} className="w-20 bg-slate-700 rounded-md px-2 py-1"
-                value={genBars} onChange={e=>setGenBars(parseInt(e.target.value||"8"))}/>
-            </div>
-
-            <div className="flex items-center gap-2 text-sm">
-              <span className="opacity-80">難易度</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={genDifficulty} onChange={e=>setGenDifficulty(parseInt(e.target.value))}>
-                <option value={1}>やさしい</option>
-                <option value={2}>ふつう</option>
-                <option value={3}>むずかしい</option>
-              </select>
-            </div>
-
-            <button
-              className="ml-auto px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              onClick={generateAndLoad}
-              disabled={isOfflineMode}
-            >
-              生成 → ロード
-            </button>
-
-            <button
-              className="px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600"
-              onClick={handleSave}
-              disabled={!notes.length}
-            >
-              保存
-            </button>
-            <button
-              className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600"
-              onClick={openLibrary}
-            >
-              ライブラリ
-            </button>
-            {isOfflineMode && (
-              <div className="basis-full text-xs text-amber-200">
-                オフライン中は生成と外部音源の読み込みは行えません。オンラインに戻ると自動で再開します。
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                className="flex-1 sm:flex-none min-h-[44px] px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
+                disabled={!notes.length || isPlaying || !instReady}
+                onClick={play}
+              >
+                Play
+              </button>
+              <button
+                className="flex-1 sm:flex-none min-h-[44px] px-5 py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
+                disabled={!isPlaying}
+                onClick={pause}
+              >
+                Pause
+              </button>
+              <button
+                className="flex-1 sm:flex-none min-h-[44px] px-5 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
+                disabled={!notes.length}
+                onClick={() => stop(true)}
+              >
+                Stop
+              </button>
+              <div className="basis-full sm:basis-auto sm:ml-auto text-xs sm:text-sm text-slate-300">
+                再生速度 {Math.round(rate * 100)}%
               </div>
-            )}
-          </div>
 
-          {/* 再生・表示系 */}
-          <div className="flex flex-wrap items-center gap-3 border-t border-slate-700 pt-3">
-            <div className="text-sm opacity-80 truncate">{name || "No file loaded"}</div>
-
-            <div className="ml-auto flex items-center gap-2 text-sm">
-              <span className="opacity-80">Speed</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={rate}
-                onChange={(e)=>setRate(parseFloat(e.target.value))}>
-                {speedOptions.map(v=>(
-                  <option key={v} value={v}>{Math.round(v*100)}%</option>
-                ))}
-              </select>
             </div>
-
-            <div className="flex items-center gap-2 text-sm">
-              <span className="opacity-80">Sound</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed" value={sound}
-                onChange={(e)=>setSound(e.target.value)}
-                disabled={isOfflineMode}>
-                <option value="synth">Synth (軽量)</option>
-                <option value="piano">Piano</option>
-                <option value="piano-bright">Piano (Bright)</option>
-              </select>
-              {soundLoading
-                ? <span className="text-xs opacity-70">loading…</span>
-                : instReady
-                  ? <span className="text-xs opacity-70">ready</span>
-                  : <span className="text-xs opacity-70">initializing…</span>
-              }
-              {isOfflineMode && (
-                <span className="text-xs text-amber-200">オフライン中はSynthのみ利用できます</span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 text-sm">
-              <span className="opacity-80">Notes</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={noteStyle}
-                onChange={(e)=>setNoteStyle(e.target.value)}>
-                <option value="rect">Rectangle</option>
-                <option value="star">⭐ Star</option>
-                <option value="heart">❤️ Heart</option>
-              </select>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-slate-300">
+                <span>Progress</span>
+                <span className="ml-auto font-mono text-sm">{fmt(playhead)} / {fmt(totalDuration)}</span>
+                <span className="basis-full text-[11px] text-slate-400">完了 {progressPercent}%</span>
+              </div>
+              <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
             </div>
           </div>
+        </div>
 
-          <div className="flex flex-wrap items-center gap-3 border-t border-slate-700 pt-3 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="opacity-80">鍵盤範囲</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={rangePreset}
-                onChange={(e)=>setRangePreset(e.target.value)}>
-                <option value="auto">Auto（楽曲解析）</option>
-                <option value="24">24鍵（幼児）</option>
-                <option value="48">48鍵（小学生）</option>
-                <option value="61">61鍵（標準）</option>
-                <option value="88">88鍵（フル）</option>
-              </select>
+        <div className="space-y-5 pt-6">
+          {isOfflineMode && (
+            <div className="text-sm text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-xl px-4 py-3">
+              現在オフラインです。外部音源と生成機能は一時的に無効になります。
             </div>
+          )}
 
-            <div className="flex items-center gap-2">
-              <span className="opacity-80">ラベル</span>
-              <select className="bg-slate-700 rounded-md px-2 py-1" value={labelMode}
-                onChange={(e)=>setLabelMode(e.target.value)}>
-                <option value="none">非表示</option>
-                <option value="AG">A–G（英名）</option>
-                <option value="DoReMi">ドレミ</option>
-              </select>
+          <details className="rounded-2xl bg-slate-800/70 shadow-lg">
+            <summary className="flex items-center justify-between min-h-[44px] cursor-pointer select-none px-4 sm:px-6 py-3 text-lg font-semibold">
+              <span>設定</span>
+              <span className="text-sm font-normal opacity-70">タップして開く</span>
+            </summary>
+            <div className="border-t border-slate-700/60 px-4 sm:px-6 py-4 space-y-4">
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
+                  <label className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm">
+                    Choose MIDI
+                    <input type="file" accept=".mid,.midi" className="hidden" onChange={onFile} />
+                  </label>
+
+                  <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
+                    <span className="opacity-80">Key</span>
+                    <select className="bg-slate-700 rounded-xl px-3 h-11" value={genKey} onChange={e => setGenKey(e.target.value)}>
+                      {["C", "D", "E", "F", "G", "A", "B"].map(k => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                    </select>
+                    <select className="bg-slate-700 rounded-xl px-3 h-11" value={genScale} onChange={e => setGenScale(e.target.value)}>
+                      <option value="major">Major</option>
+                      <option value="minor">Minor</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
+                    <span className="opacity-80">Tempo</span>
+                    <input
+                      type="number"
+                      min={50}
+                      max={160}
+                      className="w-full sm:w-24 bg-slate-700 rounded-xl px-3 h-11"
+                      value={genTempo}
+                      onChange={e => setGenTempo(parseInt(e.target.value || "90"))}
+                    />
+                    <span className="opacity-60 text-xs">bpm</span>
+                  </div>
+
+
+                  <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
+                    <span className="opacity-80">Bars</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={32}
+                      className="w-full sm:w-24 bg-slate-700 rounded-xl px-3 h-11"
+                      value={genBars}
+                      onChange={e => setGenBars(parseInt(e.target.value || "8"))}
+                    />
+                  </div>
+
+
+                  <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
+                    <span className="opacity-80">難易度</span>
+                    <select
+                      className="bg-slate-700 rounded-xl px-3 h-11"
+                      value={genDifficulty}
+                      onChange={e => setGenDifficulty(parseInt(e.target.value))}
+                    >
+                      <option value={1}>やさしい</option>
+                      <option value={2}>ふつう</option>
+                      <option value={3}>むずかしい</option>
+                    </select>
+                  </div>
+
+
+                  <button
+                    className="w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
+                    onClick={generateAndLoad}
+                    disabled={isOfflineMode}
+                  >
+                    生成 → ロード
+                  </button>
+
+                  <button
+                    className="w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
+                    onClick={handleSave}
+                    disabled={!notes.length}
+                  >
+                    保存
+                  </button>
+
+                  <button
+                    className="w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 shadow-sm transition"
+                    onClick={openLibrary}
+                  >
+                    ライブラリ
+                  </button>
+                </div>
+                {isOfflineMode && (
+                  <div className="text-xs text-amber-200">
+                    オフライン中は生成と外部音源の読み込みは行えません。オンラインに戻ると自動で再開します。
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-3 text-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <span className="opacity-80">Speed</span>
+                    <select
+                      className="w-full sm:w-auto bg-slate-700 rounded-xl px-3 h-11"
+                      value={rate}
+                      onChange={e => setRate(parseFloat(e.target.value))}
+                    >
+                      {speedOptions.map(v => (
+                        <option key={v} value={v}>
+                          {Math.round(v * 100)}%
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <span className="opacity-80">Sound</span>
+                    <select
+                      className="w-full sm:w-auto bg-slate-700 rounded-xl px-3 h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+                      value={sound}
+                      onChange={e => setSound(e.target.value)}
+                      disabled={isOfflineMode}
+                    >
+                      <option value="synth">Synth (軽量)</option>
+                      <option value="piano">Piano</option>
+                      <option value="piano-bright">Piano (Bright)</option>
+                    </select>
+                    {soundLoading ? (
+                      <span className="text-xs opacity-70">loading…</span>
+                    ) : instReady ? (
+                      <span className="text-xs opacity-70">ready</span>
+                    ) : (
+                      <span className="text-xs opacity-70">initializing…</span>
+                    )}
+                    {isOfflineMode && <span className="text-xs text-amber-200">オフライン中はSynthのみ利用できます</span>}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <span className="opacity-80">Notes</span>
+                    <select
+                      className="w-full sm:w-auto bg-slate-700 rounded-xl px-3 h-11"
+                      value={noteStyle}
+                      onChange={e => setNoteStyle(e.target.value)}
+                    >
+                      <option value="rect">Rectangle</option>
+                      <option value="star">⭐ Star</option>
+                      <option value="heart">❤️ Heart</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <span className="opacity-80">鍵盤範囲</span>
+                    <select
+                      className="w-full sm:w-auto bg-slate-700 rounded-xl px-3 h-11"
+                      value={rangePreset}
+                      onChange={e => setRangePreset(e.target.value)}
+                    >
+                      <option value="auto">Auto（楽曲解析）</option>
+                      <option value="24">24鍵（幼児）</option>
+                      <option value="48">48鍵（小学生）</option>
+                      <option value="61">61鍵（標準）</option>
+                      <option value="88">88鍵（フル）</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <span className="opacity-80">ラベル</span>
+                    <select
+                      className="w-full sm:w-auto bg-slate-700 rounded-xl px-3 h-11"
+                      value={labelMode}
+                      onChange={e => setLabelMode(e.target.value)}
+                    >
+                      <option value="none">非表示</option>
+                      <option value="AG">A–G（英名）</option>
+                      <option value="DoReMi">ドレミ</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="opacity-80 font-medium">Effect:</span>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="effectLevel"
+                        value="focus"
+                        checked={effectLevel === "focus"}
+                        onChange={e => setEffectLevel(e.target.value)}
+                      />
+                      🎯 集中
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="effectLevel"
+                        value="standard"
+                        checked={effectLevel === "standard"}
+                        onChange={e => setEffectLevel(e.target.value)}
+                      />
+                      ✨ 標準
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="effectLevel"
+                        value="fun"
+                        checked={effectLevel === "fun"}
+                        onChange={e => setEffectLevel(e.target.value)}
+                      />
+                      🎉 楽しさ
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700 pt-3 space-y-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">オフライン準備</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs ${offlineReady ? "bg-emerald-600/30 text-emerald-100" : "bg-amber-600/30 text-amber-100"}`}
+                  >
+                    {offlineReady ? "OK" : "未準備"}
+                  </span>
+                  {offlineStatusDetail?.missing?.length ? (
+                    <span className="text-xs text-amber-200">不足 {offlineStatusDetail.missing.length} 件</span>
+                  ) : (
+                    <span className="text-xs opacity-70">必須ファイルは取得済み</span>
+                  )}
+                  {offlineStatusDetail?.error && <span className="text-xs text-rose-300">{offlineStatusDetail.error}</span>}
+                  {swVersion && <span className="ml-auto text-xs opacity-70">SW {swVersion}</span>}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleManualPrecache}
+                    disabled={precacheState.status === "running"}
+                  >
+                    オフライン準備を手動実行
+                  </button>
+                  {precacheState.status === "running" && <span className="text-xs text-amber-200">キャッシュ中…</span>}
+                  {precacheState.status === "done" && (
+                    <span className="text-xs text-emerald-300">
+                      完了 ({precacheState.detail?.cached ?? 0}/{precacheState.detail?.total ?? 0})
+                    </span>
+                  )}
+                  {precacheState.status === "error" && <span className="text-xs text-rose-300">失敗しました</span>}
+                </div>
+
+                <div className="text-xs">
+                  <button className="underline decoration-dotted" onClick={() => setDevPanelOpen(v => !v)}>
+                    開発者メニューを{devPanelOpen ? "閉じる" : "開く"}
+                  </button>
+                </div>
+
+                {devPanelOpen && (
+                  <div className="space-y-3 rounded-2xl bg-slate-900/40 p-3 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button className="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600" onClick={refreshCacheReport}>
+                        再読込
+                      </button>
+                      <button
+                        className="px-3 py-2 rounded bg-rose-700 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handlePurgeCaches}
+                        disabled={purgeState?.status === "running"}
+                      >
+                        キャッシュ全削除
+                      </button>
+                      {purgeState?.status === "running" && <span className="text-amber-200">削除中…</span>}
+                      {purgeState?.status === "done" && (
+                        <span className="text-emerald-300">削除完了 ({purgeState.detail?.deleted ?? 0})</span>
+                      )}
+                      {purgeState?.status === "error" && <span className="text-rose-300">削除失敗</span>}
+                    </div>
+
+                    {cacheError && <div className="text-rose-300">キャッシュ取得に失敗しました: {cacheError}</div>}
+
+                    <div className="space-y-2 max-h-60 overflow-auto pr-1">
+                      {cacheReport.length === 0 && !cacheError && <div className="opacity-70">キャッシュは存在しません。</div>}
+                      {cacheReport.map(cache => (
+                        <div key={cache.name} className="rounded-xl bg-slate-800/70 p-2 space-y-1">
+                          <div className="font-semibold">{cache.name}</div>
+                          <div className="text-[11px] opacity-70">{cache.humanTotal} / {cache.entries.length} items</div>
+                          <ul className="space-y-1 max-h-28 overflow-auto pr-1">
+                            {cache.entries.map(entry => {
+                              let label = entry.url;
+                              if (typeof window !== "undefined") {
+                                try {
+                                  const parsed = new URL(entry.url);
+                                  label = parsed.pathname + parsed.search;
+                                } catch {}
+                              }
+                              return (
+                                <li key={entry.url} className="flex items-center gap-2 text-[11px]">
+                                  <span className="flex-1 truncate">{label}</span>
+                                  <span className="opacity-70 whitespace-nowrap">{entry.humanSize}</span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+
+                    {offlineStatusDetail?.missing?.length > 0 && (
+                      <div>
+                        <div className="font-semibold">不足中の必須ファイル</div>
+                        <ul className="list-disc list-inside space-y-1">
+                          {offlineStatusDetail.missing.map(item => (
+                            <li key={item} className="opacity-80">
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {offlineStatusDetail?.uncachedHints?.length > 0 && (
+                      <div>
+                        <div className="font-semibold">未キャッシュのアセット候補</div>
+                        <ul className="list-disc list-inside space-y-1">
+                          {offlineStatusDetail.uncachedHints.map(item => (
+                            <li key={item} className="opacity-80">
+                              {item}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
+          </details>
 
-            <div className="ml-auto flex items-center gap-4">
-              <span className="opacity-80 font-medium">Effect:</span>
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input type="radio" name="effectLevel" value="focus"
-                  checked={effectLevel==='focus'} onChange={(e)=>setEffectLevel(e.target.value)}/>
-                🎯 集中
-              </label>
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input type="radio" name="effectLevel" value="standard"
-                  checked={effectLevel==='standard'} onChange={(e)=>setEffectLevel(e.target.value)}/>
-                ✨ 標準
-              </label>
-              <label className="flex items-center gap-1 cursor-pointer">
-                <input type="radio" name="effectLevel" value="fun"
-                  checked={effectLevel==='fun'} onChange={(e)=>setEffectLevel(e.target.value)}/>
-                🎉 楽しさ
-              </label>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
-              disabled={!notes.length || isPlaying || !instReady} onClick={play}>Play</button>
-            <button className="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50"
-              disabled={!isPlaying} onClick={pause}>Pause</button>
-            <button className="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50"
-              disabled={!notes.length} onClick={()=>stop(true)}>Stop</button>
-            <div className="ml-auto text-sm opacity-80">
-              {fmt(playhead)} / {fmt(Math.max(durationRef.current, isFinite(endTimeRef.current)?endTimeRef.current:0))} <span className="ml-2 text-xs opacity-60">({Math.round(rate*100)}%)</span>
-            </div>
-          </div>
-
-          <div style={{height: 520, border: '1px solid #334155', borderRadius: 12, overflow: 'hidden'}}>
-            <canvas ref={canvasRef} style={{width:"100%", height:"100%", display:"block"}}/>
+          <div style={{ height: 520, border: "1px solid #334155", borderRadius: 12, overflow: "hidden" }}>
+            <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
           </div>
 
           <p className="text-xs opacity-70">
-            🎯集中＝鍵盤発光＋落下ノートのみ／✨標準＝リップルのみ／🎉楽しさ＝光柱＆スパーク＋リップル。<br/>
+            🎯集中＝鍵盤発光＋落下ノートのみ／✨標準＝リップルのみ／🎉楽しさ＝光柱＆スパーク＋リップル。<br />
             生成：Key/長短/テンポ/小節/難易度 を選んで「生成 → ロード」。キー: 1=20% … 9=90%, 0=100%。
           </p>
           <div className="border-t border-slate-700 pt-3 space-y-2 text-sm">
@@ -1605,30 +1834,61 @@ export default function App(){
         </div>
       </div>
 
-      {/* ライブラリモーダル */}
       {libOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
           <div className="bg-slate-800 rounded-xl p-4 w-[560px] max-w-[90%]">
             <div className="flex items-center mb-2">
               <div className="font-semibold">ライブラリ</div>
-              <button className="ml-auto px-2 py-1 bg-slate-700 rounded" onClick={()=>setLibOpen(false)}>✕</button>
+              <button className="ml-auto px-2 py-1 bg-slate-700 rounded" onClick={() => setLibOpen(false)}>
+                ✕
+              </button>
             </div>
             <div className="space-y-2 max-h-[60vh] overflow-auto">
-              {libItems.length===0 && <div className="opacity-70 text-sm">保存された曲はありません。</div>}
-              {libItems.map(item=>(
+              {libItems.length === 0 && <div className="opacity-70 text-sm">保存された曲はありません。</div>}
+              {libItems.map(item => (
                 <div key={item.id} className="flex items-center gap-2 bg-slate-700/60 rounded px-3 py-2">
                   <div className="flex-1">
                     <div className="font-medium">{item.name || "(無題)"}</div>
-                    <div className="text-xs opacity-70">{fmtDate(item.createdAt)}・{(item.size/1024).toFixed(1)} KB</div>
+                    <div className="text-xs opacity-70">{fmtDate(item.createdAt)}・{(item.size / 1024).toFixed(1)} KB</div>
                   </div>
-                  <button className="px-2 py-1 bg-indigo-600 rounded hover:bg-indigo-500" onClick={()=>loadFromLibrary(item.id)}>読込</button>
-                  <button className="px-2 py-1 bg-rose-700 rounded hover:bg-rose-600" onClick={()=>removeFromLibrary(item.id)}>削除</button>
+                  <button className="px-3 py-2 bg-indigo-600 rounded hover:bg-indigo-500" onClick={() => loadFromLibrary(item.id)}>
+                    読込
+                  </button>
+                  <button className="px-3 py-2 bg-rose-700 rounded hover:bg-rose-600" onClick={() => removeFromLibrary(item.id)}>
+                    削除
+                  </button>
                 </div>
               ))}
             </div>
             <div className="mt-3 text-right">
-              <button className="px-3 py-2 bg-slate-700 rounded" onClick={()=>setLibOpen(false)}>閉じる</button>
+              <button className="px-4 py-2 bg-slate-700 rounded" onClick={() => setLibOpen(false)}>
+                閉じる
+              </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {updateToast && (
+        <div className="fixed inset-x-0 bottom-4 z-50 px-4 flex justify-center">
+          <div className="bg-slate-900/95 border border-slate-700 text-slate-100 rounded-2xl px-4 py-3 shadow-xl flex flex-wrap items-center gap-3 max-w-xl w-full">
+            <div className="flex-1 text-sm">
+              {updateToast.status === "applying"
+                ? "更新を適用中です…数秒お待ちください。"
+                : "新しいバージョンがあります。更新しますか？"}
+            </div>
+            {updateToast.status === "applying" ? (
+              <span className="text-xs opacity-70">反映中…</span>
+            ) : (
+              <>
+                <button className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500" onClick={handleUpdateNow}>
+                  今すぐ更新
+                </button>
+                <button className="px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600" onClick={dismissUpdateToast}>
+                  あとで
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
