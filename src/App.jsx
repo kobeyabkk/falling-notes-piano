@@ -1481,7 +1481,12 @@ export default function App(){
   const fmt = (sec)=>{ const s=Math.max(0, sec|0); const m=(s/60)|0; const r=(s%60).toString().padStart(2,"0"); return `${m}:${r}`; };
   const speedOptions = [0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.85,0.9,1.0];
   const fmtDate = (ts)=>new Date(ts).toLocaleString();
-
+  const totalDuration = Math.max(
+    durationRef.current,
+    Number.isFinite(endTimeRef.current) ? endTimeRef.current : 0
+  );
+  const progressRatio = totalDuration > 0 ? Math.min(1, playhead / totalDuration) : 0;
+  const progressPercent = Math.round(progressRatio * 100);
   const { totalDuration, progressPercent } = useMemo(() => {
     const visual = Number.isFinite(visualEnd) ? visualEnd : 0;
     const total = Math.max(duration, visual);
