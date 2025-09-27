@@ -319,6 +319,7 @@ export default function App(){
 
   async function ensureAudioReady() {
     try {
+
       await Tone?.start?.();
       await Tone?.getContext?.()?.rawContext?.resume?.();
       console.log("[audio] unlocked");
@@ -326,6 +327,7 @@ export default function App(){
     } catch (e) {
       console.warn("[audio] unlock failed:", e);
       return false;
+
     }
   }
 
@@ -392,6 +394,7 @@ export default function App(){
     if (metrics.drawnNotes <= 0) return SLOW_FRAME_INTERVAL;
     if (metrics.drawnNotes < 6 && metrics.nearKeyline < 2) return MEDIUM_FRAME_INTERVAL;
     return FAST_FRAME_INTERVAL;
+
   }
 
   // hit state
@@ -854,6 +857,7 @@ export default function App(){
 
   // -------- transport --------
   async function play(){
+
     await ensureAudioReady();
     if(!masterRef.current) masterRef.current = new Tone.Gain(0.9).toDestination();
     if(!busRef.current)    busRef.current    = new Tone.Gain(1).connect(masterRef.current);
@@ -877,6 +881,7 @@ export default function App(){
       if(instrumentRef.current?.inst){
         setInstReady(true);
       }
+
     }
     cancelRAF();
     requestFrameBoost();
@@ -1476,6 +1481,7 @@ export default function App(){
   const fmt = (sec)=>{ const s=Math.max(0, sec|0); const m=(s/60)|0; const r=(s%60).toString().padStart(2,"0"); return `${m}:${r}`; };
   const speedOptions = [0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.85,0.9,1.0];
   const fmtDate = (ts)=>new Date(ts).toLocaleString();
+
   const { totalDuration, progressPercent } = useMemo(() => {
     const visual = Number.isFinite(visualEnd) ? visualEnd : 0;
     const total = Math.max(duration, visual);
@@ -1485,6 +1491,7 @@ export default function App(){
     const ratio = Math.min(1, playhead / total);
     return { totalDuration: total, progressPercent: Math.round(ratio * 100) };
   }, [duration, visualEnd, playhead]);
+
   const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
   const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
   const onlineStatusClass = isOfflineMode
@@ -1576,7 +1583,9 @@ export default function App(){
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
                   <label
+
                     className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm"
+
                   >
                     Choose MIDI
                     <input
