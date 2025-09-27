@@ -1453,43 +1453,45 @@ useEffect(() => {
   }
 
   // 半音等間隔の鍵盤
-  function drawKeyboardUniform(ctx, x, y, w, h, t, allNotes, minMidi, maxMidi, labelMode){
+    function drawKeyboardUniform(ctx, x, y, w, h, t, allNotes, minMidi, maxMidi, labelMode){
     const keyW = keyWidth(w);
-
-    ctx.fillStyle = COLORS.keyShadow; ctx.fillRect(x, y-6, w, 6);
-
+  
+    // 上縁の影
+    ctx.fillStyle = COLORS.keyShadow;
+    ctx.fillRect(x, y - 6, w, 6);
+  
+    // ✅ 黒鍵の高さまでを白い下地で一度だけ敷く（濃い帯を消す）
+    {
+      const blackH  = h * BLACK_H_RATIO;
+      const plateTop = y;
+      const plateH   = Math.ceil(blackH + 6);   // 少し深めに
+      ctx.fillStyle = COLORS.whiteKey;          // 通常描画（source-over）
+      ctx.fillRect(x, plateTop, w, plateH);     // キーボード全幅
+    }
+  
     // 白鍵
-    for(let m=minMidi; m<=maxMidi; m++){
-      if(!isWhite(m)) continue;
+    for (let m = minMidi; m <= maxMidi; m++) {
+      if (!isWhite(m)) continue;
       const keyX = xForMidi(m, w);
       if (effectLevel === "focus") {
         ctx.fillStyle = COLORS.whiteKey;
-        ctx.fillRect(keyX, y, keyW-1, h);
+        ctx.fillRect(keyX, y, keyW - 1, h);
         ctx.strokeStyle = COLORS.keyBorder;
-        ctx.strokeRect(keyX, y, keyW-1, h);
+        ctx.strokeRect(keyX, y, keyW - 1, h);
       } else {
         drawWhiteKey(ctx, keyX, y, keyW, h, false);
       }
     }
-          // ── 白鍵の直後：黒鍵の高さまでは背面を白で埋めておく（黒鍵左右の濃い帯を消す）
-          {
-        const blackH = h * BLACK_H_RATIO;
-        const plateTop = y;
-        const plateH   = Math.ceil(blackH + 6); // 少し深めに
-      
-        ctx.save();
-        ctx.globalCompositeOperation = "destination-over"; // 既存描画の“背面”に敷く
-        ctx.fillStyle = COLORS.whiteKey;                   // 背面を白に
-        ctx.fillRect(x, plateTop, w, plateH);              // キーボード全幅に敷く
-        ctx.restore();
-      }
+  
+    // ❌ ここにもう一度プレートを敷くブロックは入れない（削除）
+  
     // 黒鍵
-    for(let m=minMidi; m<=maxMidi; m++){
-      if(isWhite(m)) continue;
+    for (let m = minMidi; m <= maxMidi; m++) {
+      if (isWhite(m)) continue;
       const keyX = xForMidi(m, w);
       const blackW = keyW * BLACK_W_RATIO;
       const blackH = h   * BLACK_H_RATIO;
-      const bx = keyX + (keyW - blackW)/2;
+      const bx = keyX + (keyW - blackW) / 2;
       if (effectLevel === "focus") {
         ctx.fillStyle = COLORS.blackKey;
         ctx.fillRect(bx, y, blackW, blackH);
@@ -1497,6 +1499,10 @@ useEffect(() => {
         drawBlackKey(ctx, bx, y, blackW, blackH, false);
       }
     }
+  
+    // …以下（アクティブ/マーカー/ラベル）はそのまま…
+  
+
 
     // アクティブ
     const active = new Set();
