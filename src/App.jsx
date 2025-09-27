@@ -1135,11 +1135,52 @@ useEffect(() => {
   function xForMidi(midi, W){ return ((midi - viewMinMidi) / keyCountVisible()) * W; }
   function keyWidth(W){ return W / keyCountVisible(); }
 
+  function computeKeyboardGeom(W, minMidi, maxMidi) {
+    // count visible white keys
+    let totalWhiteKeys = 0;
+    for (let m = minMidi; m <= maxMidi; m++) if (isWhite(m)) totalWhiteKeys++;
+
+    const whiteW = W / Math.max(1, totalWhiteKeys);
+    const blackW = whiteW * BLACK_W_RATIO;
+
+    const countWhitesBefore = (pitch) => {
+      let c = 0;
+      for (let m = minMidi; m < pitch; m++) if (isWhite(m)) c++;
+      return c;
+    };
+
+    function centerFor(midi) {
+      if (isWhite(midi)) {
+        return countWhitesBefore(midi) * whiteW + whiteW / 2;
+      } else {
+        // Anchor to whichever boundary white key is visible
+        let L = midi - 1; while (L >= minMidi && !isWhite(L)) L--;
+        let R = midi + 1; while (R <= maxMidi && !isWhite(R)) R++;
+
+        if (L >= minMidi) {
+          // right edge of left white key
+          return (countWhitesBefore(L) + 1) * whiteW;
+        } else if (R <= maxMidi) {
+          // left edge of right white key
+          return countWhitesBefore(R) * whiteW;
+        } else {
+          // fallback (shouldn't happen)
+          return whiteW / 2;
+        }
+      }
+    }
+
+    const widthFor = (midi) => (isWhite(midi) ? whiteW : blackW);
+    return { centerFor, widthFor };
+  }
+
   function renderFrame(t){
     const c = canvasRef.current; if(!c) return;
     const ctx = c.getContext("2d");
     const { W, H } = canvasSizeRef.current;
     if(!W || !H) return;
+
+    const geom = computeKeyboardGeom(W, viewMinMidi, viewMaxMidi);
 
     // bg
     const base = {r:9,g:17,b:25};
@@ -1174,8 +1215,6 @@ useEffect(() => {
       }
     }
 
-    const wKey = keyWidth(W);
-
     // ----- NOTES（鍵盤の上に出ないようクリップ） -----
     ctx.save();
     ctx.beginPath();
@@ -1209,6 +1248,11 @@ useEffect(() => {
       const yTopPrev = timeToYTop(tPrev, n.start, totalVisual, h);
       const yBottomPrev = yTopPrev + h;
 
+      const cx = geom.centerFor(n.midi);
+      const keyW = geom.widthFor(n.midi);
+      const baseX = cx - keyW / 2;
+      const width = Math.max(1, keyW - 2);
+
       // 発音判定（try/catchで保護）
       const crossed = (yBottomPrev < keylineY) && (yBottom >= keylineY);
       const justLanded = isPlayingRef.current && crossed && !landedAtRef.current.has(n.i);
@@ -1224,7 +1268,7 @@ useEffect(() => {
 
         // ビジュアル（音が失敗しても実行）
         if(effectLevel!=="focus"){
-          const xCenter = xForMidi(n.midi, W) + wKey/2;
+          const xCenter = cx;
           const pc = isWhite(n.midi) ? COLORS.particleWhite : COLORS.particleBlack;
           if(effectLevel==="standard"){
             spawnRipple(ripplesRef.current, {x:xCenter, y:keylineY}, "standard");
@@ -1248,14 +1292,13 @@ useEffect(() => {
       metrics.drawnNotes += 1;
       if(yBottom >= keylineY - 40 && yBottom <= keylineY + 160) metrics.nearKeyline += 1;
 
-      const baseX = xForMidi(n.midi, W);
       const x = baseX + 1;
 
       // トレイル
       if(effectLevel!=="focus" && isPlayingRef.current && yTop>=0 && yTop<=keylineY){
         if(!trailsRef.current.has(n.i)) trailsRef.current.set(n.i, []);
         const trail = trailsRef.current.get(n.i);
-        trail.push({ x: baseX + wKey/2, y: yTop + h/2, time: t, color: isWhite(n.midi) ? COLORS.trailWhite : COLORS.trailBlack });
+        trail.push({ x: cx, y: yTop + h/2, time: t, color: isWhite(n.midi) ? COLORS.trailWhite : COLORS.trailBlack });
         if(trail.length>8) trail.shift();
       }
 
@@ -1265,13 +1308,11 @@ useEffect(() => {
 
       const isW = isWhite(n.midi);
       const fill = isW ? (isLit?COLORS.noteWhiteActive:COLORS.noteWhite) : (isLit?COLORS.noteBlackActive:COLORS.noteBlack);
-      const width = Math.max(1, wKey-2);
       const batchKey = fill;
       if(!noteBatches.has(batchKey)) noteBatches.set(batchKey, []);
       noteBatches.get(batchKey).push({ x, y: yTop, w: width, h });
 
       if(shouldDrawOverlay){
-        const cx = baseX + wKey/2;
         const cy = yTop + Math.min(h*0.35, 18);
         overlayShapes.push({ cx, cy, size: Math.min(width, h*0.4)/2 });
       }
@@ -1453,117 +1494,222 @@ useEffect(() => {
   }
 
   // 半音等間隔の鍵盤
-    function drawKeyboardUniform(ctx, x, y, w, h, t, allNotes, minMidi, maxMidi, labelMode){
-    const keyW = keyWidth(w);
-  
-    // 上縁の影
+  function drawKeyboardUniform(ctx, x, y, w, h, t, allNotes, minMidi, maxMidi, labelMode){
+    // 1. 表示範囲内の白鍵総数を計算
+    let totalWhiteKeys = 0;
+    for (let m = minMidi; m <= maxMidi; m++) {
+      if (isWhite(m)) {
+        totalWhiteKeys++;
+      }
+    }
+
+    // 2. 白鍵の基本幅を決定
+    const whiteKeyWidth = w / Math.max(1, totalWhiteKeys);
+
+    // 3. 各MIDIノートのレイアウト情報を計算
+    const keyLayout = new Map();
+    
+    // 白鍵の位置を先に計算
+    let currentWhiteX = x;
+    const whiteKeyPositions = new Map();
+    
+    for (let m = minMidi; m <= maxMidi; m++) {
+      if (isWhite(m)) {
+        const layout = {
+          x: currentWhiteX,
+          y: y,
+          w: whiteKeyWidth,
+          h: h,
+          isWhite: true
+        };
+        keyLayout.set(m, layout);
+        whiteKeyPositions.set(m, currentWhiteX);
+        currentWhiteX += whiteKeyWidth;
+      }
+    }
+
+    // 4. 黒鍵の位置を計算
+    for (let m = minMidi; m <= maxMidi; m++) {
+      if (!isWhite(m)) {
+        const blackKeyWidth = whiteKeyWidth * BLACK_W_RATIO;
+        const blackKeyHeight = h * BLACK_H_RATIO;
+        
+        let leftWhite = m - 1;
+        while (leftWhite >= minMidi && !isWhite(leftWhite)) {
+          leftWhite--;
+        }
+        
+        if (leftWhite >= minMidi && whiteKeyPositions.has(leftWhite)) {
+          const leftWhiteX = whiteKeyPositions.get(leftWhite);
+          const blackKeyX = leftWhiteX + whiteKeyWidth - (blackKeyWidth / 2);
+          
+          keyLayout.set(m, {
+            x: blackKeyX,
+            y: y,
+            w: blackKeyWidth,
+            h: blackKeyHeight,
+            isWhite: false
+          });
+        }
+      }
+    }
+
+    // 5. 鍵盤の上縁の影
     ctx.fillStyle = COLORS.keyShadow;
     ctx.fillRect(x, y - 6, w, 6);
-  
-    // ✅ 黒鍵の高さまでを白い下地で一度だけ敷く（濃い帯を消す）
-    {
-      const blackH  = h * BLACK_H_RATIO;
-      const plateTop = y;
-      const plateH   = Math.ceil(blackH + 6);   // 少し深めに
-      ctx.fillStyle = COLORS.whiteKey;          // 通常描画（source-over）
-      ctx.fillRect(x, plateTop, w, plateH);     // キーボード全幅
-    }
-  
-    // 白鍵
+
+    // 6. 【下レイヤー】白鍵を完全な長方形として境界線付きで描画
+    ctx.save();
+    
     for (let m = minMidi; m <= maxMidi; m++) {
-      if (!isWhite(m)) continue;
-      const keyX = xForMidi(m, w);
+      const layout = keyLayout.get(m);
+      if (!layout || !layout.isWhite) continue;
+
       if (effectLevel === "focus") {
+        // シンプルモード：白鍵本体
         ctx.fillStyle = COLORS.whiteKey;
-        ctx.fillRect(keyX, y, keyW - 1, h);
+        ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
+        
+        // 完全な境界線（上から下まで、左右も含む）
         ctx.strokeStyle = COLORS.keyBorder;
-        ctx.strokeRect(keyX, y, keyW - 1, h);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(layout.x + 0.5, layout.y + 0.5, layout.w - 1, layout.h - 1);
       } else {
-        drawWhiteKey(ctx, keyX, y, keyW, h, false);
+        // 高品質モード：まず基本の長方形を描画
+        ctx.fillStyle = COLORS.whiteKey;
+        ctx.beginPath();
+        drawRoundedRect(ctx, layout.x, layout.y, layout.w - 1, layout.h, 5);
+        ctx.fill();
+        
+        // 境界線
+        ctx.strokeStyle = COLORS.keyBorder;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        // その後、質感を追加（drawWhiteKeyの内容を適用）
+        const g = ctx.createLinearGradient(layout.x, layout.y, layout.x, layout.y + layout.h);
+        g.addColorStop(0, "#f7f9fb");
+        g.addColorStop(0.5, "#eef2f7");
+        g.addColorStop(1, "#e3e8ef");
+        ctx.fillStyle = g;
+        ctx.fill();
+
+        // 内側の影
+        const side = ctx.createLinearGradient(layout.x, layout.y, layout.x + layout.w, layout.y);
+        side.addColorStop(0.0, "rgba(0,0,0,0.10)");
+        side.addColorStop(0.08, "rgba(0,0,0,0.00)");
+        side.addColorStop(0.92, "rgba(0,0,0,0.00)");
+        side.addColorStop(1.0, "rgba(0,0,0,0.10)");
+        ctx.fillStyle = side;
+        ctx.fillRect(layout.x, layout.y, layout.w - 1, layout.h);
+
+        // 光沢
+        const gloss = ctx.createLinearGradient(layout.x, layout.y, layout.x, layout.y + layout.h * 0.28);
+        gloss.addColorStop(0, "rgba(255,255,255,0.65)");
+        gloss.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = gloss;
+        ctx.fillRect(layout.x + 1, layout.y + 1, layout.w - 3, layout.h * 0.28);
       }
     }
-  
-    // ❌ ここにもう一度プレートを敷くブロックは入れない（削除）
-  
-    // 黒鍵
+    
+    ctx.restore();
+
+    // 7. 【上レイヤー】黒鍵を描画（白鍵の境界線を隠す）
     for (let m = minMidi; m <= maxMidi; m++) {
-      if (isWhite(m)) continue;
-      const keyX = xForMidi(m, w);
-      const blackW = keyW * BLACK_W_RATIO;
-      const blackH = h   * BLACK_H_RATIO;
-      const bx = keyX + (keyW - blackW) / 2;
+      const layout = keyLayout.get(m);
+      if (!layout || layout.isWhite) continue;
+
       if (effectLevel === "focus") {
         ctx.fillStyle = COLORS.blackKey;
-        ctx.fillRect(bx, y, blackW, blackH);
+        ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
       } else {
-        drawBlackKey(ctx, bx, y, blackW, blackH, false);
+        drawBlackKey(ctx, layout.x, layout.y, layout.w, layout.h, false);
       }
     }
-  
-    // …以下（アクティブ/マーカー/ラベル）はそのまま…
-  
 
-
-    // アクティブ
+    // 8. アクティブ表示
     const active = new Set();
     for(const [id, landedAt] of landedAtRef.current){
-      const n = allNotes[id]; if(!n) continue;
+      const n = allNotes[id]; 
+      if(!n) continue;
       if(n.midi < minMidi || n.midi > maxMidi) continue;
       const litUntil = landedAt + Math.max(MIN_LIT_SEC, (n.end-n.start)/rateRef.current);
-      if(t<=litUntil+0.02) active.add(n.midi);
+      if(t <= litUntil + 0.02) active.add(n.midi);
     }
+    
     for(const midi of active){
-      const keyX = xForMidi(midi, w);
-      const isW = isWhite(midi);
+      const layout = keyLayout.get(midi);
+      if(!layout) continue;
+
       const flashEnd = keyFlashRef.current.get(midi) ?? 0;
       const flashDur = (FLASH_MS/1000)/rateRef.current;
       const flashAlpha = Math.max(0, Math.min(1, (flashEnd - t)/flashDur));
-      const base = isW ? COLORS.keyActiveWhite : COLORS.keyActiveBlack;
+      const base = layout.isWhite ? COLORS.keyActiveWhite : COLORS.keyActiveBlack;
       ctx.fillStyle = base;
-      if(isW){
-        ctx.globalAlpha = 0.35; ctx.fillRect(keyX, y, keyW-1, h);
-        if(flashAlpha>0){ ctx.globalAlpha = 0.35 + 0.35*flashAlpha; ctx.fillRect(keyX, y, keyW-1, h); }
-      }else{
-        const blackW = keyW*BLACK_W_RATIO, blackH=h*BLACK_H_RATIO, bx=keyX+(keyW-blackW)/2;
-        ctx.globalAlpha = 0.4; ctx.fillRect(bx, y, blackW, blackH);
-        if(flashAlpha>0){ ctx.globalAlpha = 0.4 + 0.35*flashAlpha; ctx.fillRect(bx, y, blackW, blackH); }
+
+      if(layout.isWhite){
+        ctx.globalAlpha = 0.35; 
+        ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
+        if(flashAlpha > 0){ 
+          ctx.globalAlpha = 0.35 + 0.35 * flashAlpha; 
+          ctx.fillRect(layout.x, layout.y, layout.w, layout.h); 
+        }
+      } else {
+        ctx.globalAlpha = 0.4; 
+        ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
+        if(flashAlpha > 0){ 
+          ctx.globalAlpha = 0.4 + 0.35 * flashAlpha; 
+          ctx.fillRect(layout.x, layout.y, layout.w, layout.h); 
+        }
       }
       ctx.globalAlpha = 1;
     }
 
-    // Cマーカー
+    // 9. Cマーカー
     ctx.save();
-    for(let m=minMidi; m<=maxMidi; m++){
-      if(m%12!==0) continue;
-      const keyX = xForMidi(m, w);
-      const cx = keyX + keyW/2;
-      const isC4 = (m===MIDDLE_C);
-      ctx.strokeStyle = isC4?COLORS.markerC4:COLORS.markerC;
-      ctx.lineWidth = isC4?3:2;
-      ctx.beginPath(); ctx.moveTo(cx, y-6); ctx.lineTo(cx, y-1); ctx.stroke();
+    for(let m = minMidi; m <= maxMidi; m++){
+      if(m % 12 !== 0) continue;
+      const layout = keyLayout.get(m);
+      if(!layout || !layout.isWhite) continue;
+
+      const cx = layout.x + layout.w / 2;
+      const isC4 = (m === MIDDLE_C);
+      ctx.strokeStyle = isC4 ? COLORS.markerC4 : COLORS.markerC;
+      ctx.lineWidth = isC4 ? 3 : 2;
+      ctx.beginPath(); 
+      ctx.moveTo(cx, y - 6); 
+      ctx.lineTo(cx, y - 1); 
+      ctx.stroke();
+      
       if(isC4){
         ctx.fillStyle = "rgba(251,191,36,0.2)";
-        ctx.beginPath(); ctx.arc(cx, y-10, 10, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = COLORS.markerC4; ctx.font = "bold 10px ui-sans-serif, system-ui"; ctx.textAlign="center";
-        ctx.fillText("C4", cx, y-10);
+        ctx.beginPath(); 
+        ctx.arc(cx, y - 10, 10, 0, Math.PI * 2); 
+        ctx.fill();
+        ctx.fillStyle = COLORS.markerC4; 
+        ctx.font = "bold 10px ui-sans-serif, system-ui"; 
+        ctx.textAlign = "center";
+        ctx.fillText("C4", cx, y - 10);
       }
     }
     ctx.restore();
 
-    // ラベル
-    if(labelMode!=="none"){
+    // 10. ラベル
+    if(labelMode !== "none"){
       ctx.save();
       ctx.fillStyle = COLORS.label;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = "11px ui-sans-serif, system-ui";
-      for(let m=minMidi; m<=maxMidi; m++){
-        if(!isWhite(m)) continue;
-        const keyX = xForMidi(m, w);
-        const cx = keyX + keyW/2;
-        const { name, octave } = (labelMode==="AG") ? nameAG(m) : nameDoReMi(m);
-        const text = (labelMode==="AG") ? `${name}${octave}` : name;
-        ctx.fillText(text, cx, y + h - 12);
+      
+      for(let m = minMidi; m <= maxMidi; m++){
+        const layout = keyLayout.get(m);
+        if(!layout || !layout.isWhite) continue;
+
+        const cx = layout.x + layout.w / 2;
+        const { name, octave } = (labelMode === "AG") ? nameAG(m) : nameDoReMi(m);
+        const text = (labelMode === "AG") ? `${name}${octave}` : name;
+        ctx.fillText(text, cx, layout.y + layout.h - 12);
       }
       ctx.restore();
     }
