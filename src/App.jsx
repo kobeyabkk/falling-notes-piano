@@ -1590,6 +1590,7 @@ useEffect(() => {
       }
     }
 
+
     // ★ここに追加：白鍵の境界線を上部まで描画
     {
       const blackHeight = h * BLACK_H_RATIO;
@@ -1622,6 +1623,7 @@ useEffect(() => {
       ctx.stroke();
       ctx.restore();
     }
+
 
     // 9. アクティブ表示（新しいレイアウトに対応）
     const active = new Set();
