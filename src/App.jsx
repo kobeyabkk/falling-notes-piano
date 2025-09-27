@@ -1,5 +1,5 @@
 // App.jsx
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Tone from "tone";
 import { Midi } from "@tonejs/midi";
 import { listSongs, saveSong, loadSongBytes, removeSong } from "./db";
@@ -1481,12 +1481,6 @@ export default function App(){
   const fmt = (sec)=>{ const s=Math.max(0, sec|0); const m=(s/60)|0; const r=(s%60).toString().padStart(2,"0"); return `${m}:${r}`; };
   const speedOptions = [0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.85,0.9,1.0];
   const fmtDate = (ts)=>new Date(ts).toLocaleString();
-  const totalDuration = Math.max(
-    durationRef.current,
-    Number.isFinite(endTimeRef.current) ? endTimeRef.current : 0
-  );
-  const progressRatio = totalDuration > 0 ? Math.min(1, playhead / totalDuration) : 0;
-  const progressPercent = Math.round(progressRatio * 100);
   const { totalDuration, progressPercent } = useMemo(() => {
     const visual = Number.isFinite(visualEnd) ? visualEnd : 0;
     const total = Math.max(duration, visual);
@@ -2019,36 +2013,6 @@ export default function App(){
                   今すぐ更新
                 </button>
                 <button className="px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600" onClick={dismissUpdateToast}>
-                  あとで
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {updateToast && (
-        <div className="fixed inset-x-0 bottom-4 z-50 px-4 flex justify-center">
-          <div className="bg-slate-900/95 border border-slate-700 text-slate-100 rounded-2xl px-4 py-3 shadow-xl flex flex-wrap items-center gap-3 max-w-xl w-full">
-            <div className="flex-1 text-sm">
-              {updateToast.status === "applying"
-                ? "更新を適用中です…数秒お待ちください。"
-                : "新しいバージョンがあります。更新しますか？"}
-            </div>
-            {updateToast.status === "applying" ? (
-              <span className="text-xs opacity-70">反映中…</span>
-            ) : (
-              <>
-                <button
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500"
-                  onClick={handleUpdateNow}
-                >
-                  今すぐ更新
-                </button>
-                <button
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600"
-                  onClick={dismissUpdateToast}
-                >
                   あとで
                 </button>
               </>
