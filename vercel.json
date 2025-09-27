@@ -1,12 +1,6 @@
 {
-  "headers": [
-    {
-      "source": "/index.html",
-      "headers": [{ "key": "Cache-Control", "value": "no-store" }]
-    },
-    {
-      "source": "/sw.js",
-      "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
-    }
+  "rewrites": [
+    { "source": "/",          "destination": "/pixel-perfect-piano.html" },
+    { "source": "/index.html","destination": "/pixel-perfect-piano.html" }
   ]
 }
