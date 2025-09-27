@@ -263,6 +263,7 @@ export default function App(){
 
   async function ensureAudioReady() {
     try {
+
       await Tone?.start?.();
       await Tone?.getContext?.()?.rawContext?.resume?.();
       console.log("[audio] unlocked");
@@ -270,6 +271,7 @@ export default function App(){
     } catch (e) {
       console.warn("[audio] unlock failed:", e);
       return false;
+
     }
   }
 
@@ -728,6 +730,7 @@ export default function App(){
 
   // -------- transport --------
   async function play(){
+
     await ensureAudioReady();
     if(!masterRef.current) masterRef.current = new Tone.Gain(0.9).toDestination();
     if(!busRef.current)    busRef.current    = new Tone.Gain(1).connect(masterRef.current);
@@ -751,6 +754,7 @@ export default function App(){
       if(instrumentRef.current?.inst){
         setInstReady(true);
       }
+
     }
     cancelRAF();
 
@@ -1409,7 +1413,9 @@ export default function App(){
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
                   <label
+
                     className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm"
+
                   >
                     Choose MIDI
                     <input
