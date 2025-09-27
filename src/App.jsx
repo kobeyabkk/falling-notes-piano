@@ -1136,12 +1136,15 @@ useEffect(() => {
   function keyWidth(W){ return W / keyCountVisible(); }
 
   function computeKeyboardGeom(W, minMidi, maxMidi) {
+
     // count visible white keys
     let totalWhiteKeys = 0;
     for (let m = minMidi; m <= maxMidi; m++) if (isWhite(m)) totalWhiteKeys++;
 
+
     const whiteW = W / Math.max(1, totalWhiteKeys);
     const blackW = whiteW * BLACK_W_RATIO;
+
 
     const countWhitesBefore = (pitch) => {
       let c = 0;
@@ -1171,6 +1174,7 @@ useEffect(() => {
     }
 
     const widthFor = (midi) => (isWhite(midi) ? whiteW : blackW);
+
     return { centerFor, widthFor };
   }
 
@@ -1528,6 +1532,7 @@ useEffect(() => {
       }
     }
 
+
     // 4. 黒鍵の位置（境界白鍵が画面外でも必ず描画）
     for (let m = minMidi; m <= maxMidi; m++) {
       if (isWhite(m)) continue;
@@ -1551,6 +1556,7 @@ useEffect(() => {
 
       if (boundaryX != null) {
         keyLayout.set(m, { x: boundaryX - bw / 2, y, w: bw, h: bh, isWhite: false });
+
       }
     }
 
@@ -1592,6 +1598,7 @@ useEffect(() => {
       }
     }
 
+
     // ★ここに追加：白鍵の境界線を上部まで描画
     {
       const blackHeight = h * BLACK_H_RATIO;
@@ -1624,6 +1631,7 @@ useEffect(() => {
       ctx.stroke();
       ctx.restore();
     }
+
 
     // 9. アクティブ表示（新しいレイアウトに対応）
     const active = new Set();
