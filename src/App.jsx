@@ -1136,38 +1136,44 @@ useEffect(() => {
   function keyWidth(W){ return W / keyCountVisible(); }
 
   function computeKeyboardGeom(W, minMidi, maxMidi) {
+
+    // count visible white keys
     let totalWhiteKeys = 0;
-    for (let m = minMidi; m <= maxMidi; m++) {
-      if (isWhite(m)) totalWhiteKeys++;
-    }
+    for (let m = minMidi; m <= maxMidi; m++) if (isWhite(m)) totalWhiteKeys++;
+
 
     const whiteW = W / Math.max(1, totalWhiteKeys);
     const blackW = whiteW * BLACK_W_RATIO;
 
+
+    const countWhitesBefore = (pitch) => {
+      let c = 0;
+      for (let m = minMidi; m < pitch; m++) if (isWhite(m)) c++;
+      return c;
+    };
+
     function centerFor(midi) {
-      let whiteIndex = 0;
-      for (let m = minMidi; m < midi; m++) {
-        if (isWhite(m)) whiteIndex++;
-      }
-
       if (isWhite(midi)) {
-        return whiteIndex * whiteW + whiteW / 2;
+        return countWhitesBefore(midi) * whiteW + whiteW / 2;
       } else {
-        let leftWhite = midi - 1;
-        while (leftWhite >= minMidi && !isWhite(leftWhite)) {
-          leftWhite--;
+        // Anchor to whichever boundary white key is visible
+        let L = midi - 1; while (L >= minMidi && !isWhite(L)) L--;
+        let R = midi + 1; while (R <= maxMidi && !isWhite(R)) R++;
+
+        if (L >= minMidi) {
+          // right edge of left white key
+          return (countWhitesBefore(L) + 1) * whiteW;
+        } else if (R <= maxMidi) {
+          // left edge of right white key
+          return countWhitesBefore(R) * whiteW;
+        } else {
+          // fallback (shouldn't happen)
+          return whiteW / 2;
         }
-        let leftWhiteIndex = 0;
-        for (let m = minMidi; m < leftWhite; m++) {
-          if (isWhite(m)) leftWhiteIndex++;
-        }
-        return (leftWhiteIndex + 1) * whiteW;
       }
     }
 
-    function widthFor(midi) {
-      return isWhite(midi) ? whiteW : blackW;
-    }
+    const widthFor = (midi) => (isWhite(midi) ? whiteW : blackW);
 
     return { centerFor, widthFor };
   }
@@ -1526,29 +1532,31 @@ useEffect(() => {
       }
     }
 
-    // 4. 黒鍵の位置を計算（隣接する白鍵の境界上に中央配置）
+
+    // 4. 黒鍵の位置（境界白鍵が画面外でも必ず描画）
     for (let m = minMidi; m <= maxMidi; m++) {
-      if (!isWhite(m)) {
-        const blackKeyWidth = whiteKeyWidth * BLACK_W_RATIO;
-        const blackKeyHeight = h * BLACK_H_RATIO;
+      if (isWhite(m)) continue;
 
-        let leftWhite = m - 1;
-        while (leftWhite >= minMidi && !isWhite(leftWhite)) {
-          leftWhite--;
-        }
+      const bw = whiteKeyWidth * BLACK_W_RATIO;
+      const bh = h * BLACK_H_RATIO;
 
-        if (leftWhite >= minMidi && whiteKeyPositions.has(leftWhite)) {
-          const leftWhiteX = whiteKeyPositions.get(leftWhite);
-          const blackKeyX = leftWhiteX + whiteKeyWidth - (blackKeyWidth / 2);
+      // search neighbor white keys (even if they are offscreen)
+      let L = m - 1; while (L >= minMidi && !isWhite(L)) L--;
+      let R = m + 1; while (R <= maxMidi && !isWhite(R)) R++;
 
-          keyLayout.set(m, {
-            x: blackKeyX,
-            y: y,
-            w: blackKeyWidth,
-            h: blackKeyHeight,
-            isWhite: false
-          });
-        }
+      // anchor to whichever boundary is visible in this range
+      let boundaryX = null;
+      if (L >= minMidi && whiteKeyPositions.has(L)) {
+        // right edge of the left white key
+        boundaryX = whiteKeyPositions.get(L) + whiteKeyWidth;
+      } else if (R <= maxMidi && whiteKeyPositions.has(R)) {
+        // left edge of the right white key
+        boundaryX = whiteKeyPositions.get(R);
+      }
+
+      if (boundaryX != null) {
+        keyLayout.set(m, { x: boundaryX - bw / 2, y, w: bw, h: bh, isWhite: false });
+
       }
     }
 
@@ -1589,6 +1597,41 @@ useEffect(() => {
         drawBlackKey(ctx, layout.x, layout.y, layout.w, layout.h, false);
       }
     }
+
+
+    // ★ここに追加：白鍵の境界線を上部まで描画
+    {
+      const blackHeight = h * BLACK_H_RATIO;
+      ctx.save();
+      ctx.strokeStyle = COLORS.keyBorder;  // 既存の境界線色を使用
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.8;  // 自然な見た目のため少し透過
+
+      // 白鍵同士の境界に縦線を描画
+      ctx.beginPath();
+      for (let m = minMidi; m <= maxMidi; m++) {
+        const layout = keyLayout.get(m);
+        if (!layout || !layout.isWhite) continue;
+
+        // 各白鍵の右端に縦線（最後の白鍵は除く）
+        const isLastWhiteKey = (() => {
+          for (let nextM = m + 1; nextM <= maxMidi; nextM++) {
+            const nextLayout = keyLayout.get(nextM);
+            if (nextLayout && nextLayout.isWhite) return false;
+          }
+          return true;
+        })();
+
+        if (!isLastWhiteKey) {
+          const rightEdge = layout.x + layout.w - 0.5;
+          ctx.moveTo(rightEdge, y);
+          ctx.lineTo(rightEdge, y + blackHeight);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
 
     // 9. アクティブ表示（新しいレイアウトに対応）
     const active = new Set();
