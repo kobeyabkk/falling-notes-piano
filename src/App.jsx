@@ -1136,12 +1136,15 @@ useEffect(() => {
   function keyWidth(W){ return W / keyCountVisible(); }
 
   function computeKeyboardGeom(W, minMidi, maxMidi) {
+
     // count visible white keys
     let totalWhiteKeys = 0;
     for (let m = minMidi; m <= maxMidi; m++) if (isWhite(m)) totalWhiteKeys++;
 
+
     const whiteW = W / Math.max(1, totalWhiteKeys);
     const blackW = whiteW * BLACK_W_RATIO;
+
 
     const countWhitesBefore = (pitch) => {
       let c = 0;
@@ -1171,6 +1174,7 @@ useEffect(() => {
     }
 
     const widthFor = (midi) => (isWhite(midi) ? whiteW : blackW);
+
     return { centerFor, widthFor };
   }
 
@@ -1508,11 +1512,13 @@ useEffect(() => {
 
     // 3. 各MIDIノートのレイアウト情報を計算
     const keyLayout = new Map();
+
     
     // 白鍵の位置を先に計算
     let currentWhiteX = x;
     const whiteKeyPositions = new Map();
     
+
     for (let m = minMidi; m <= maxMidi; m++) {
       if (isWhite(m)) {
         const layout = {
@@ -1527,6 +1533,7 @@ useEffect(() => {
         currentWhiteX += whiteKeyWidth;
       }
     }
+
 
     // 4. 黒鍵の位置を計算
     for (let m = minMidi; m <= maxMidi; m++) {
@@ -1551,6 +1558,7 @@ useEffect(() => {
             isWhite: false
           });
         }
+
       }
     }
 
@@ -1558,9 +1566,11 @@ useEffect(() => {
     ctx.fillStyle = COLORS.keyShadow;
     ctx.fillRect(x, y - 6, w, 6);
 
+
     // 6. 【下レイヤー】白鍵を完全な長方形として境界線付きで描画
     ctx.save();
     
+
     for (let m = minMidi; m <= maxMidi; m++) {
       const layout = keyLayout.get(m);
       if (!layout || !layout.isWhite) continue;
@@ -1568,6 +1578,7 @@ useEffect(() => {
       if (effectLevel === "focus") {
         // シンプルモード：白鍵本体
         ctx.fillStyle = COLORS.whiteKey;
+
         ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
         
         // 完全な境界線（上から下まで、左右も含む）
@@ -1615,6 +1626,7 @@ useEffect(() => {
     ctx.restore();
 
     // 7. 【上レイヤー】黒鍵を描画（白鍵の境界線を隠す）
+
     for (let m = minMidi; m <= maxMidi; m++) {
       const layout = keyLayout.get(m);
       if (!layout || layout.isWhite) continue;
@@ -1627,7 +1639,9 @@ useEffect(() => {
       }
     }
 
+
     // 8. アクティブ表示
+
     const active = new Set();
     for(const [id, landedAt] of landedAtRef.current){
       const n = allNotes[id]; 
@@ -1636,7 +1650,7 @@ useEffect(() => {
       const litUntil = landedAt + Math.max(MIN_LIT_SEC, (n.end-n.start)/rateRef.current);
       if(t <= litUntil + 0.02) active.add(n.midi);
     }
-    
+
     for(const midi of active){
       const layout = keyLayout.get(midi);
       if(!layout) continue;
@@ -1649,10 +1663,12 @@ useEffect(() => {
 
       if(layout.isWhite){
         ctx.globalAlpha = 0.35; 
+
         ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
         if(flashAlpha > 0){ 
           ctx.globalAlpha = 0.35 + 0.35 * flashAlpha; 
           ctx.fillRect(layout.x, layout.y, layout.w, layout.h); 
+
         }
       } else {
         ctx.globalAlpha = 0.4; 
@@ -1665,7 +1681,9 @@ useEffect(() => {
       ctx.globalAlpha = 1;
     }
 
+
     // 9. Cマーカー
+
     ctx.save();
     for(let m = minMidi; m <= maxMidi; m++){
       if(m % 12 !== 0) continue;
@@ -1694,7 +1712,9 @@ useEffect(() => {
     }
     ctx.restore();
 
+
     // 10. ラベル
+
     if(labelMode !== "none"){
       ctx.save();
       ctx.fillStyle = COLORS.label;
