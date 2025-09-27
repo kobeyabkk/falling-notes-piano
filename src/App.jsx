@@ -1115,14 +1115,12 @@ useEffect(() => {
         cancelRAF();
         return;
       }
-
     }
 
     if(isPlayingRef.current){
       playheadRef.current = t;
       syncUiPlayhead(t, { timestamp: perfNow });
     }
-
 
     const metrics = renderFrame(t);
     if(!boostActive){
@@ -1457,27 +1455,29 @@ useEffect(() => {
   // 半音等間隔の鍵盤
     function drawKeyboardUniform(ctx, x, y, w, h, t, allNotes, minMidi, maxMidi, labelMode){
     const keyW = keyWidth(w);
-
-
-    ctx.fillStyle = COLORS.keyShadow; ctx.fillRect(x, y-6, w, 6);
-    ctx.save();
-    ctx.globalCompositeOperation = "destination-over";
-    ctx.fillStyle = COLORS.whiteKey;
-    ctx.fillRect(x, y, w, h);
-    ctx.restore();
-
-
+  
+    // 上縁の影
+    ctx.fillStyle = COLORS.keyShadow;
+    ctx.fillRect(x, y - 6, w, 6);
+  
+    // ✅ 黒鍵の高さまでを白い下地で一度だけ敷く（濃い帯を消す）
+    {
+      const blackH  = h * BLACK_H_RATIO;
+      const plateTop = y;
+      const plateH   = Math.ceil(blackH + 6);   // 少し深めに
+      ctx.fillStyle = COLORS.whiteKey;          // 通常描画（source-over）
+      ctx.fillRect(x, plateTop, w, plateH);     // キーボード全幅
+    }
+  
     // 白鍵
     for (let m = minMidi; m <= maxMidi; m++) {
       if (!isWhite(m)) continue;
       const keyX = xForMidi(m, w);
       if (effectLevel === "focus") {
         ctx.fillStyle = COLORS.whiteKey;
-
-        ctx.fillRect(keyX, y, keyW, h);
+        ctx.fillRect(keyX, y, keyW - 1, h);
         ctx.strokeStyle = COLORS.keyBorder;
-        ctx.strokeRect(keyX + 0.5, y + 0.5, keyW - 1, h - 1);
-
+        ctx.strokeRect(keyX, y, keyW - 1, h);
       } else {
         drawWhiteKey(ctx, keyX, y, keyW, h, false);
       }
@@ -1491,9 +1491,7 @@ useEffect(() => {
       const keyX = xForMidi(m, w);
       const blackW = keyW * BLACK_W_RATIO;
       const blackH = h   * BLACK_H_RATIO;
-
-      const bx = keyX + (keyW - blackW)/2;
-
+      const bx = keyX + (keyW - blackW) / 2;
       if (effectLevel === "focus") {
         ctx.fillStyle = COLORS.blackKey;
         ctx.fillRect(bx, y, blackW, blackH);
@@ -1523,8 +1521,8 @@ useEffect(() => {
       const base = isW ? COLORS.keyActiveWhite : COLORS.keyActiveBlack;
       ctx.fillStyle = base;
       if(isW){
-        ctx.globalAlpha = 0.35; ctx.fillRect(keyX, y, keyW, h);
-        if(flashAlpha>0){ ctx.globalAlpha = 0.35 + 0.35*flashAlpha; ctx.fillRect(keyX, y, keyW, h); }
+        ctx.globalAlpha = 0.35; ctx.fillRect(keyX, y, keyW-1, h);
+        if(flashAlpha>0){ ctx.globalAlpha = 0.35 + 0.35*flashAlpha; ctx.fillRect(keyX, y, keyW-1, h); }
       }else{
         const blackW = keyW*BLACK_W_RATIO, blackH=h*BLACK_H_RATIO, bx=keyX+(keyW-blackW)/2;
         ctx.globalAlpha = 0.4; ctx.fillRect(bx, y, blackW, blackH);
@@ -1593,7 +1591,6 @@ useEffect(() => {
     const ratio = Math.min(1, playhead / total);
     return { totalDuration: total, progressPercent: Math.round(ratio * 100) };
   }, [duration, visualEnd, playhead]);
-
 
   const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
   const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
