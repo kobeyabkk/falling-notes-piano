@@ -263,10 +263,15 @@ export default function App(){
 
   async function ensureAudioReady() {
     try {
-      await Tone.start();
-      await Tone.context.resume?.();
+
+      await Tone?.start?.();
+      await Tone?.getContext?.()?.rawContext?.resume?.();
+      console.log("[audio] unlocked");
+      return true;
     } catch (e) {
-      console.warn("[audio] resume failed", e);
+      console.warn("[audio] unlock failed:", e);
+      return false;
+
     }
   }
 
@@ -726,18 +731,30 @@ export default function App(){
   // -------- transport --------
   async function play(){
 
-    await ensureAudioReady?.();
-
-    if(!audioReady){
-      masterRef.current = new Tone.Gain(0.9).toDestination();
-      busRef.current = new Tone.Gain(1).connect(masterRef.current);
-      setAudioReady(true);
-    }
+    await ensureAudioReady();
+    if(!masterRef.current) masterRef.current = new Tone.Gain(0.9).toDestination();
+    if(!busRef.current)    busRef.current    = new Tone.Gain(1).connect(masterRef.current);
+    if(!audioReady) setAudioReady(true);
     if(!notes.length) return;
-    const usingSynth = sound === "synth" || !instrumentRef.current?.inst;
-    if(!usingSynth && !instReady){
-      alert("外部音源を読み込み中です。準備完了後に再生できます。オフライン時はSynthをご利用ください。");
-      return;
+    const wantsExternal = sound !== "synth";
+    const hasExternal = !!instrumentRef.current?.inst && instReady;
+    if(wantsExternal && !hasExternal){
+      alert("外部音源を読み込み中です。準備できるまで一時的にSynthで再生します。");
+      setSound("synth");
+      if(!instrumentRef.current?.inst){
+        try{
+          const fallback = await createSynthChain();
+          const last = fallback.chain[fallback.chain.length - 1];
+          last.connect(busRef.current);
+          instrumentRef.current = fallback;
+        }catch(err){
+          console.warn("[audio] synth fallback failed:", err);
+        }
+      }
+      if(instrumentRef.current?.inst){
+        setInstReady(true);
+      }
+
     }
     cancelRAF();
 
