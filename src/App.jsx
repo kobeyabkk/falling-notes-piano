@@ -80,6 +80,75 @@ function addRoundedRectPath(ctx, x, y, w, h) {
   ctx.closePath();
 }
 
+
+// key proportions & skin
+const BLACK_W_RATIO = 0.66;   // 黒鍵の横幅（白鍵比）
+const BLACK_H_RATIO = 0.62;   // 黒鍵の縦の長さ（鍵盤高さ比）
+const KEY_RADIUS     = 6;
+
+function drawRoundedRect(ctx, x, y, w, h, r = KEY_RADIUS) {
+  addRoundedRectPath(ctx, x, y, w, h);
+}
+
+function drawWhiteKey(ctx, x, y, w, h, active = false) {
+  // base subtle gradient
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, "#f7f9fb");
+  g.addColorStop(0.5, "#eef2f7");
+  g.addColorStop(1, "#e3e8ef");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  drawRoundedRect(ctx, x, y, w - 1, h, 5);
+  ctx.fill();
+
+  // side inner shading
+  const side = ctx.createLinearGradient(x, y, x + w, y);
+  side.addColorStop(0.0, "rgba(0,0,0,0.10)");
+  side.addColorStop(0.08, "rgba(0,0,0,0.00)");
+  side.addColorStop(0.92, "rgba(0,0,0,0.00)");
+  side.addColorStop(1.0, "rgba(0,0,0,0.10)");
+  ctx.fillStyle = side;
+  ctx.fillRect(x, y, w - 1, h);
+
+  // top gloss
+  const gloss = ctx.createLinearGradient(x, y, x, y + h * 0.28);
+  gloss.addColorStop(0, active ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.65)");
+  gloss.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gloss;
+  ctx.fillRect(x + 1, y + 1, w - 3, h * 0.28);
+
+  // outer border
+  ctx.strokeStyle = "#cfd4da";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 2, h - 1);
+}
+
+function drawBlackKey(ctx, x, y, w, h, active = false) {
+  // deep glossy body
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, active ? "#1b1e23" : "#171a1f");
+  g.addColorStop(0.6, active ? "#2b3036" : "#262b31");
+  g.addColorStop(1, active ? "#30353c" : "#2c3138");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  drawRoundedRect(ctx, x, y, w, h, 4);
+  ctx.fill();
+
+  // top gloss strip
+  const gloss = ctx.createLinearGradient(x, y, x, y + h);
+  gloss.addColorStop(0.0, "rgba(255,255,255,0.20)");
+  gloss.addColorStop(0.15, "rgba(255,255,255,0.06)");
+  gloss.addColorStop(0.35, "rgba(255,255,255,0.00)");
+  ctx.fillStyle = gloss;
+  ctx.fillRect(x + 1, y + 1, w - 2, h * 0.45);
+
+  // edge
+  ctx.strokeStyle = "rgba(0,0,0,0.60)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+}
+
+
 function getNow() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
 }
@@ -291,9 +360,15 @@ export default function App(){
     }
   }, [devPanelOpen]);
 
-  useEffect(() => {
-    Tone.Transport.scheduleAheadTime = 0.2;
-  }, []);
+
+useEffect(() => {
+  const ua = (typeof navigator !== "undefined" && (navigator.userAgent || "")) || "";
+  // ゆるめの判定：iPad かつ古めの OS / 旧世代機っぽい場合
+  const looksOldiPad =
+    /iPad/i.test(ua) && (/(OS 1[2-4]_|\bCPU OS 1[2-4]_)/i.test(ua) || /A10|A10X|A9|A8/i.test(ua));
+  Tone.Transport.scheduleAheadTime = looksOldiPad ? 0.38 : 0.22;
+}, []);
+
 
   // timing
   const playheadRef = useRef(0);
@@ -1387,20 +1462,28 @@ export default function App(){
     for(let m=minMidi; m<=maxMidi; m++){
       if(!isWhite(m)) continue;
       const keyX = xForMidi(m, w);
-      ctx.fillStyle = COLORS.whiteKey;
-      ctx.fillRect(keyX, y, keyW-1, h);
-      ctx.strokeStyle = COLORS.keyBorder;
-      ctx.strokeRect(keyX, y, keyW-1, h);
+      if (effectLevel === "focus") {
+        ctx.fillStyle = COLORS.whiteKey;
+        ctx.fillRect(keyX, y, keyW-1, h);
+        ctx.strokeStyle = COLORS.keyBorder;
+        ctx.strokeRect(keyX, y, keyW-1, h);
+      } else {
+        drawWhiteKey(ctx, keyX, y, keyW, h, false);
+      }
     }
     // 黒鍵
     for(let m=minMidi; m<=maxMidi; m++){
       if(isWhite(m)) continue;
       const keyX = xForMidi(m, w);
-      const blackW = keyW * 0.7;
-      const blackH = h * 0.62;
+      const blackW = keyW * BLACK_W_RATIO;
+      const blackH = h   * BLACK_H_RATIO;
       const bx = keyX + (keyW - blackW)/2;
-      ctx.fillStyle = COLORS.blackKey;
-      ctx.fillRect(bx, y, blackW, blackH);
+      if (effectLevel === "focus") {
+        ctx.fillStyle = COLORS.blackKey;
+        ctx.fillRect(bx, y, blackW, blackH);
+      } else {
+        drawBlackKey(ctx, bx, y, blackW, blackH, false);
+      }
     }
 
     // アクティブ
@@ -1423,7 +1506,7 @@ export default function App(){
         ctx.globalAlpha = 0.35; ctx.fillRect(keyX, y, keyW-1, h);
         if(flashAlpha>0){ ctx.globalAlpha = 0.35 + 0.35*flashAlpha; ctx.fillRect(keyX, y, keyW-1, h); }
       }else{
-        const blackW = keyW*0.7, blackH=h*0.62, bx=keyX+(keyW-blackW)/2;
+        const blackW = keyW*BLACK_W_RATIO, blackH=h*BLACK_H_RATIO, bx=keyX+(keyW-blackW)/2;
         ctx.globalAlpha = 0.4; ctx.fillRect(bx, y, blackW, blackH);
         if(flashAlpha>0){ ctx.globalAlpha = 0.4 + 0.35*flashAlpha; ctx.fillRect(bx, y, blackW, blackH); }
       }
