@@ -1,5 +1,5 @@
 // App.jsx
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Tone from "tone";
 import { Midi } from "@tonejs/midi";
 import { listSongs, saveSong, loadSongBytes, removeSong } from "./db";
@@ -55,6 +55,101 @@ const COLORS = {
   fadeEdge: "rgba(0,0,0,0.45)",
   label: "#334155",
 };
+
+const FAST_FRAME_INTERVAL = 1000 / 60;
+const MEDIUM_FRAME_INTERVAL = 1000 / 30;
+const SLOW_FRAME_INTERVAL = 1000 / 15;
+
+const DevStatsOverlay = React.memo(function DevStatsOverlay({ visible, fps, drops }) {
+  if (!visible) return null;
+  return (
+    <div className="pointer-events-none fixed bottom-3 left-3 rounded bg-emerald-900/70 px-2 py-1 text-[11px] font-mono text-emerald-200 shadow-lg">
+      <div>fps: {fps.toFixed(1)}</div>
+      <div>drops: {drops.toFixed(1)}/s</div>
+    </div>
+  );
+});
+
+function addRoundedRectPath(ctx, x, y, w, h) {
+  const r = Math.min(6, w * 0.3);
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// key proportions & skin
+const BLACK_W_RATIO = 0.66;   // 黒鍵の横幅（白鍵比）
+const BLACK_H_RATIO = 0.62;   // 黒鍵の縦の長さ（鍵盤高さ比）
+const KEY_RADIUS     = 6;
+
+function drawRoundedRect(ctx, x, y, w, h, r = KEY_RADIUS) {
+  addRoundedRectPath(ctx, x, y, w, h);
+}
+
+function drawWhiteKey(ctx, x, y, w, h, active = false) {
+  // base subtle gradient
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, "#f7f9fb");
+  g.addColorStop(0.5, "#eef2f7");
+  g.addColorStop(1, "#e3e8ef");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  drawRoundedRect(ctx, x, y, w - 1, h, 5);
+  ctx.fill();
+
+  // side inner shading
+  const side = ctx.createLinearGradient(x, y, x + w, y);
+  side.addColorStop(0.0, "rgba(0,0,0,0.10)");
+  side.addColorStop(0.08, "rgba(0,0,0,0.00)");
+  side.addColorStop(0.92, "rgba(0,0,0,0.00)");
+  side.addColorStop(1.0, "rgba(0,0,0,0.10)");
+  ctx.fillStyle = side;
+  ctx.fillRect(x, y, w - 1, h);
+
+  // top gloss
+  const gloss = ctx.createLinearGradient(x, y, x, y + h * 0.28);
+  gloss.addColorStop(0, active ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.65)");
+  gloss.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gloss;
+  ctx.fillRect(x + 1, y + 1, w - 3, h * 0.28);
+
+  // outer border
+  ctx.strokeStyle = "#cfd4da";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 2, h - 1);
+}
+
+function drawBlackKey(ctx, x, y, w, h, active = false) {
+  // deep glossy body
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, active ? "#1b1e23" : "#171a1f");
+  g.addColorStop(0.6, active ? "#2b3036" : "#262b31");
+  g.addColorStop(1, active ? "#30353c" : "#2c3138");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  drawRoundedRect(ctx, x, y, w, h, 4);
+  ctx.fill();
+
+  // top gloss strip
+  const gloss = ctx.createLinearGradient(x, y, x, y + h);
+  gloss.addColorStop(0.0, "rgba(255,255,255,0.20)");
+  gloss.addColorStop(0.15, "rgba(255,255,255,0.06)");
+  gloss.addColorStop(0.35, "rgba(255,255,255,0.00)");
+  ctx.fillStyle = gloss;
+  ctx.fillRect(x + 1, y + 1, w - 2, h * 0.45);
+
+  // edge
+  ctx.strokeStyle = "rgba(0,0,0,0.60)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+}
+
+function getNow() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
 
 // ---------- utilities ----------
 function mergeConsecutiveNotes(notes, gap=VISUAL_MERGE_GAP){
@@ -202,6 +297,7 @@ export default function App(){
 
   const [noteStyle, setNoteStyle] = useState("star");
   const [effectLevel, setEffectLevel] = useState("standard"); // focus | standard | fun
+  const [loopEnabled, setLoopEnabled] = useState(false);
   const [labelMode, setLabelMode] = useState("none"); // none | AG | DoReMi
 
   const [rangePreset, setRangePreset] = useState("auto");
@@ -232,9 +328,12 @@ export default function App(){
   const [cacheReport, setCacheReport] = useState([]);
   const [purgeState, setPurgeState] = useState(null);
   const [cacheError, setCacheError] = useState(null);
+  const [frameStats, setFrameStats] = useState({ fps: 0, drops: 0 });
   const controllerSeenRef = useRef(
     typeof navigator !== "undefined" ? Boolean(navigator.serviceWorker?.controller) : false
   );
+
+  const isDevEnvironment = import.meta.env?.DEV ?? false;
 
   // 可視窓
   const noteStartsRef = useRef([]);
@@ -248,6 +347,25 @@ export default function App(){
   };
   useEffect(() => { noteStartsRef.current = notes.map(n => n.start); }, [notes]);
 
+  useEffect(() => {
+    loopEnabledRef.current = loopEnabled;
+  }, [loopEnabled]);
+
+  useEffect(() => {
+    devPanelOpenRef.current = devPanelOpen;
+    if (devPanelOpen) {
+      setFrameStats(frameStatsLatestRef.current);
+    }
+  }, [devPanelOpen]);
+
+useEffect(() => {
+  const ua = (typeof navigator !== "undefined" && (navigator.userAgent || "")) || "";
+  // ゆるめの判定：iPad かつ古めの OS / 旧世代機っぽい場合
+  const looksOldiPad =
+    /iPad/i.test(ua) && (/(OS 1[2-4]_|\bCPU OS 1[2-4]_)/i.test(ua) || /A10|A10X|A9|A8/i.test(ua));
+  Tone.Transport.scheduleAheadTime = looksOldiPad ? 0.38 : 0.22;
+}, []);
+
   // timing
   const playheadRef = useRef(0);
   const t0Ref = useRef(0);
@@ -255,11 +373,97 @@ export default function App(){
   const rafActiveRef = useRef(false);
   const isPlayingRef = useRef(false);
   const prevTRef = useRef(0);
+  const lastFrameTimeRef = useRef(0);
+  const frameIntervalRef = useRef(FAST_FRAME_INTERVAL);
+  const frameBoostUntilRef = useRef(0);
+  const forceFrameRef = useRef(false);
+  const lastUiUpdateRef = useRef(0);
+  const loopEnabledRef = useRef(false);
+  const frameStatsRef = useRef({ lastSample: 0, frames: 0, skipped: 0 });
+  const frameStatsLatestRef = useRef({ fps: 0, drops: 0 });
+  const devPanelOpenRef = useRef(false);
 
   // audio
   const masterRef = useRef(null);
   const busRef = useRef(null);
   const instrumentRef = useRef(null);
+
+  async function ensureAudioReady() {
+    try {
+      await Tone?.start?.();
+      await Tone?.getContext?.()?.rawContext?.resume?.();
+      console.log("[audio] unlocked");
+      return true;
+    } catch (e) {
+      console.warn("[audio] unlock failed:", e);
+      return false;
+    }
+  }
+
+  const requestFrameBoost = useCallback((duration = 1200) => {
+    const now = getNow();
+    frameBoostUntilRef.current = now + duration;
+    frameIntervalRef.current = FAST_FRAME_INTERVAL;
+    forceFrameRef.current = true;
+  }, []);
+
+  const syncUiPlayhead = useCallback(
+    (value, { force = false, timestamp } = {}) => {
+      const now = timestamp ?? getNow();
+      if (force) {
+        lastUiUpdateRef.current = now;
+        setPlayhead(value);
+        return;
+      }
+      if (now - lastUiUpdateRef.current >= 100) {
+        lastUiUpdateRef.current = now;
+        setPlayhead(value);
+      }
+    },
+    [setPlayhead]
+  );
+
+  const recordFrame = useCallback(
+    (timestamp, drawn) => {
+      const stats = frameStatsRef.current;
+      if (!stats.lastSample) {
+        stats.lastSample = timestamp;
+      }
+      if (drawn) stats.frames += 1; else stats.skipped += 1;
+      const elapsed = timestamp - stats.lastSample;
+      if (elapsed >= 1000) {
+        const fps = (stats.frames * 1000) / elapsed;
+        const drops = (stats.skipped * 1000) / elapsed;
+        const snapshot = { fps, drops };
+        frameStatsLatestRef.current = snapshot;
+        if (devPanelOpenRef.current) {
+          setFrameStats(snapshot);
+        }
+        stats.frames = 0;
+        stats.skipped = 0;
+        stats.lastSample = timestamp;
+      }
+    },
+    [setFrameStats]
+  );
+
+  function resetVisualState() {
+    keyFlashRef.current.clear();
+    landedAtRef.current.clear();
+    particlesRef.current = [];
+    ripplesRef.current = [];
+    trailsRef.current.clear();
+    aurasRef.current = [];
+    bgIntensityRef.current = 0;
+  }
+
+  function determineFrameInterval(metrics) {
+    if (!isPlayingRef.current) return FAST_FRAME_INTERVAL;
+    if (!metrics) return FAST_FRAME_INTERVAL;
+    if (metrics.drawnNotes <= 0) return SLOW_FRAME_INTERVAL;
+    if (metrics.drawnNotes < 6 && metrics.nearKeyline < 2) return MEDIUM_FRAME_INTERVAL;
+    return FAST_FRAME_INTERVAL;
+  }
 
   // hit state
   const keyFlashRef = useRef(new Map()); // midi -> until(sec)
@@ -457,14 +661,18 @@ export default function App(){
     busRef.current = new Tone.Gain(1).connect(masterRef.current);
     setAudioReady(true);
 
-    setTimeout(onResize, 0);
+    const raf = requestAnimationFrame(() => {
+      onResize();
+      requestFrameBoost();
+    });
     return ()=>{
       try{ instrumentRef.current?.inst?.dispose?.(); }catch{}
       try{ instrumentRef.current?.chain?.forEach(n=>{n.disconnect?.(); n.dispose?.();}); }catch{}
       try{ busRef.current?.disconnect?.(); busRef.current?.dispose?.(); }catch{}
       try{ masterRef.current?.disconnect?.(); masterRef.current?.dispose?.(); }catch{}
+      cancelAnimationFrame(raf);
     };
-  },[]);
+  },[requestFrameBoost]);
 
   // ====== 楽器の生成/切替 ======
   useEffect(()=>{
@@ -519,7 +727,7 @@ export default function App(){
     const handle=()=>onResize();
     window.addEventListener("resize", handle);
     return ()=>window.removeEventListener("resize", handle);
-  },[notes, viewMinMidi, viewMaxMidi]);
+  },[notes, viewMinMidi, viewMaxMidi, requestFrameBoost]);
 
   useEffect(()=>()=>cancelRAF(),[]);
 
@@ -533,10 +741,17 @@ export default function App(){
     canvasSizeRef.current = { W:rect.width, H:rect.height };
     recomputeVisualEnd(rect.height, notes);
     renderFrame(playheadRef.current);
+    requestFrameBoost();
   }
 
   function cancelRAF(){ rafActiveRef.current=false; if(rafIdRef.current){ cancelAnimationFrame(rafIdRef.current); rafIdRef.current=0; } }
-  function startRAF(){ if(rafActiveRef.current) return; rafActiveRef.current=true; rafIdRef.current=requestAnimationFrame(draw); }
+  function startRAF(){
+    if(rafActiveRef.current) return;
+    rafActiveRef.current=true;
+    lastFrameTimeRef.current = 0;
+    forceFrameRef.current = true;
+    rafIdRef.current=requestAnimationFrame(draw);
+  }
 
   // visualEnd → endTimeRef へ即反映（未確定時はInfinity）
   function recomputeVisualEnd(H, src){
@@ -581,13 +796,7 @@ export default function App(){
 
       applyRangePreset(rangePreset, merged);
 
-      keyFlashRef.current.clear();
-      landedAtRef.current.clear();
-      particlesRef.current = [];
-      ripplesRef.current = [];
-      trailsRef.current.clear();
-      aurasRef.current = [];
-      bgIntensityRef.current = 0;
+      resetVisualState();
 
       stop(true);
       const H = canvasSizeRef.current.H || canvasRef.current?.getBoundingClientRect().height || 0;
@@ -716,13 +925,36 @@ export default function App(){
 
   // -------- transport --------
   async function play(){
+    await ensureAudioReady();
+    if(!masterRef.current) masterRef.current = new Tone.Gain(0.9).toDestination();
+    if(!busRef.current)    busRef.current    = new Tone.Gain(1).connect(masterRef.current);
+    if(!audioReady) setAudioReady(true);
     if(!notes.length) return;
-    if(!instReady || !instrumentRef.current?.inst){
-      alert("音源を読み込み中です。Synth に切り替えるとすぐに再生できます。");
-      return;
+    const wantsExternal = sound !== "synth";
+    const hasExternal = !!instrumentRef.current?.inst && instReady;
+    if(wantsExternal && !hasExternal){
+      alert("外部音源を読み込み中です。準備できるまで一時的にSynthで再生します。");
+      setSound("synth");
+      if(!instrumentRef.current?.inst){
+        try{
+          const fallback = await createSynthChain();
+          const last = fallback.chain[fallback.chain.length - 1];
+          last.connect(busRef.current);
+          instrumentRef.current = fallback;
+        }catch(err){
+          console.warn("[audio] synth fallback failed:", err);
+        }
+      }
+      if(instrumentRef.current?.inst){
+        setInstReady(true);
+      }
     }
-    await Tone.start();
     cancelRAF();
+    requestFrameBoost();
+    frameStatsRef.current.lastSample = 0;
+    frameStatsRef.current.frames = 0;
+    frameStatsRef.current.skipped = 0;
+    lastUiUpdateRef.current = 0;
 
     // 再生開始時に visualEnd を再計算（高さ未確定対策）
     const H = canvasSizeRef.current.H || canvasRef.current?.getBoundingClientRect().height || 0;
@@ -731,6 +963,7 @@ export default function App(){
     const now = Tone.now();
     t0Ref.current = now - (playheadRef.current / rateRef.current);
     prevTRef.current = playheadRef.current;
+    syncUiPlayhead(playheadRef.current, { force: true, timestamp: getNow() });
 
     masterRef.current?.gain?.rampTo?.(0.9, 0.03);
     isPlayingRef.current = true;
@@ -739,6 +972,7 @@ export default function App(){
   }
   function pause(){
     cancelRAF();
+    requestFrameBoost();
     const tFreeze = isPlayingRef.current
       ? (Tone.now() - t0Ref.current) * rateRef.current
       : playheadRef.current;
@@ -746,7 +980,7 @@ export default function App(){
     isPlayingRef.current = false;
     setIsPlaying(false);
 
-    setPlayhead(tFreeze);
+    syncUiPlayhead(tFreeze, { force: true, timestamp: getNow() });
     playheadRef.current = tFreeze;
     prevTRef.current = tFreeze;
 
@@ -757,22 +991,17 @@ export default function App(){
   }
   function stop(resetToZero=true){
     cancelRAF();
+    requestFrameBoost();
     isPlayingRef.current = false;
     setIsPlaying(false);
 
     const target = resetToZero ? 0 : playheadRef.current;
-    setPlayhead(target);
+    syncUiPlayhead(target, { force: true, timestamp: getNow() });
     playheadRef.current = target;
     prevTRef.current = target;
     t0Ref.current = Tone.now() - (target / rateRef.current);
 
-    keyFlashRef.current.clear();
-    landedAtRef.current.clear();
-    particlesRef.current = [];
-    ripplesRef.current = [];
-    trailsRef.current.clear();
-    aurasRef.current = [];
-    bgIntensityRef.current = 0;
+    resetVisualState();
 
     masterRef.current?.gain?.rampTo?.(0, 0.03);
     instrumentRef.current?.inst?.releaseAll?.();
@@ -833,29 +1062,61 @@ export default function App(){
 
   // -------- drawing --------
   function draw(){
-    const now = Tone.now();
-    let t = isPlayingRef.current ? (now - t0Ref.current)*rateRef.current : playheadRef.current;
+    const perfNow = getNow();
+    const boostActive = perfNow < frameBoostUntilRef.current;
+    const interval = boostActive ? FAST_FRAME_INTERVAL : frameIntervalRef.current;
+    const lastTime = lastFrameTimeRef.current;
 
-    // 終了判定：ref優先（state遅延を回避）
-    const limitVisual = endTimeRef.current;
-    const limit = Math.max(durationRef.current, isFinite(limitVisual) ? limitVisual : 0) + STOP_TAIL;
-    const epsilon = 1/60; // 1フレームの余裕
-
-    if(isPlayingRef.current && limit>0 && t >= limit - epsilon){
-      t = limit;
-      isPlayingRef.current = false;
-      setIsPlaying(false);
-      setPlayhead(limit);
-      playheadRef.current = limit;
-      masterRef.current?.gain?.rampTo?.(0, 0.03);
-      instrumentRef.current?.inst?.releaseAll?.();
-      renderFrame(limit);
-      cancelRAF();
+    if(!forceFrameRef.current && lastTime && perfNow - lastTime < interval){
+      if(isDevEnvironment) recordFrame(perfNow, false);
+      if(rafActiveRef.current) rafIdRef.current = requestAnimationFrame(draw);
       return;
     }
 
-    if(isPlayingRef.current){ setPlayhead(t); playheadRef.current = t; }
-    renderFrame(t);
+    forceFrameRef.current = false;
+    lastFrameTimeRef.current = perfNow;
+    if(isDevEnvironment) recordFrame(perfNow, true);
+
+    const now = Tone.now();
+    let t = isPlayingRef.current ? (now - t0Ref.current)*rateRef.current : playheadRef.current;
+
+    const limitVisual = endTimeRef.current;
+    const limit = Math.max(durationRef.current, isFinite(limitVisual) ? limitVisual : 0) + STOP_TAIL;
+    const epsilon = 1/60;
+
+    if(isPlayingRef.current && limit>0 && t >= limit - epsilon){
+      if(loopEnabledRef.current && notes.length){
+        resetVisualState();
+        instrumentRef.current?.inst?.releaseAll?.();
+        t = 0;
+        playheadRef.current = 0;
+        prevTRef.current = 0;
+        t0Ref.current = now;
+        syncUiPlayhead(0, { force: true, timestamp: perfNow });
+        requestFrameBoost();
+      }else{
+        t = limit;
+        isPlayingRef.current = false;
+        setIsPlaying(false);
+        syncUiPlayhead(limit, { force: true, timestamp: perfNow });
+        playheadRef.current = limit;
+        masterRef.current?.gain?.rampTo?.(0, 0.03);
+        instrumentRef.current?.inst?.releaseAll?.();
+        renderFrame(limit);
+        cancelRAF();
+        return;
+      }
+    }
+
+    if(isPlayingRef.current){
+      playheadRef.current = t;
+      syncUiPlayhead(t, { timestamp: perfNow });
+    }
+
+    const metrics = renderFrame(t);
+    if(!boostActive){
+      frameIntervalRef.current = determineFrameInterval(metrics);
+    }
 
     if(rafActiveRef.current) rafIdRef.current = requestAnimationFrame(draw);
   }
@@ -911,6 +1172,12 @@ export default function App(){
     ctx.beginPath();
     ctx.rect(0, 0, W, keylineY);
     ctx.clip();
+
+    const noteBatches = new Map();
+    const overlayShapes = [];
+    const metrics = { drawnNotes: 0, nearKeyline: 0 };
+    const drawRectOnly = effectLevel === "focus" || noteStyle === "rect";
+    const shouldDrawOverlay = !drawRectOnly;
 
     // 可視範囲のノートだけを走査
     const lookBack = (totalVisual / SPEED) + VISUAL_MAX_SEC + 1.0;
@@ -969,13 +1236,17 @@ export default function App(){
       if(!inView) { trailsRef.current.delete(n.i); continue; }
       if(yTop>H || yBottom<0){ trailsRef.current.delete(n.i); continue; }
 
-      const x = xForMidi(n.midi, W);
+      metrics.drawnNotes += 1;
+      if(yBottom >= keylineY - 40 && yBottom <= keylineY + 160) metrics.nearKeyline += 1;
+
+      const baseX = xForMidi(n.midi, W);
+      const x = baseX + 1;
 
       // トレイル
       if(effectLevel!=="focus" && isPlayingRef.current && yTop>=0 && yTop<=keylineY){
         if(!trailsRef.current.has(n.i)) trailsRef.current.set(n.i, []);
         const trail = trailsRef.current.get(n.i);
-        trail.push({ x: x + wKey/2, y: yTop + h/2, time: t, color: isWhite(n.midi) ? COLORS.trailWhite : COLORS.trailBlack });
+        trail.push({ x: baseX + wKey/2, y: yTop + h/2, time: t, color: isWhite(n.midi) ? COLORS.trailWhite : COLORS.trailBlack });
         if(trail.length>8) trail.shift();
       }
 
@@ -985,7 +1256,42 @@ export default function App(){
 
       const isW = isWhite(n.midi);
       const fill = isW ? (isLit?COLORS.noteWhiteActive:COLORS.noteWhite) : (isLit?COLORS.noteBlackActive:COLORS.noteBlack);
-      drawNote(ctx, noteStyle, { x:x+1, y:yTop, w:Math.max(1,wKey-2), h, color:fill });
+      const width = Math.max(1, wKey-2);
+      const batchKey = fill;
+      if(!noteBatches.has(batchKey)) noteBatches.set(batchKey, []);
+      noteBatches.get(batchKey).push({ x, y: yTop, w: width, h });
+
+      if(shouldDrawOverlay){
+        const cx = baseX + wKey/2;
+        const cy = yTop + Math.min(h*0.35, 18);
+        overlayShapes.push({ cx, cy, size: Math.min(width, h*0.4)/2 });
+      }
+    }
+
+    for(const [fill, boxes] of noteBatches.entries()){
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      for(const box of boxes){
+        addRoundedRectPath(ctx, box.x, box.y, box.w, box.h);
+      }
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    if(shouldDrawOverlay && overlayShapes.length){
+      ctx.save();
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.strokeStyle = "rgba(0,0,0,0.15)";
+      ctx.lineWidth = 1;
+      for(const shape of overlayShapes){
+        if(noteStyle === "star") drawStar(ctx, shape.cx, shape.cy, shape.size, 5);
+        else drawHeart(ctx, shape.cx, shape.cy, shape.size);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     if(effectLevel!=="focus") drawTrails(ctx, trailsRef.current, t);
@@ -1006,51 +1312,7 @@ export default function App(){
     ctx.fillText(`${fmt(t)} / ${fmt(Math.max(durationRef.current, isFinite(endTimeRef.current)?endTimeRef.current:0))}  (${Math.round(rateRef.current*100)}%)`, 10, 16);
 
     prevTRef.current = t;
-  }
-
-  function drawNote(ctx, style, box){
-    const {x,y,w,h,color} = box;
-    ctx.fillStyle = color;
-
-    const drawRectOnly = (effectLevel==="focus");
-    if(drawRectOnly || style==="rect"){
-      const r = Math.min(6, w*0.3);
-      ctx.beginPath();
-      ctx.moveTo(x+r, y);
-      ctx.arcTo(x+w, y, x+w, y+h, r);
-      ctx.arcTo(x+w, y+h, x, y+h, r);
-      ctx.arcTo(x, y+h, x, y, r);
-      ctx.arcTo(x, y, x+w, y, r);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.12)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      return;
-    }
-
-    const r = Math.min(6, w*0.3);
-    ctx.beginPath();
-    ctx.moveTo(x+r, y);
-    ctx.arcTo(x+w, y, x+w, y+h, r);
-    ctx.arcTo(x+w, y+h, x, y+h, r);
-    ctx.arcTo(x, y+h, x, y, r);
-    ctx.arcTo(x, y, x+w, y, r);
-    ctx.closePath();
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    const cx = x + w/2, cy = y + Math.min(h*0.35, 18);
-    ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.strokeStyle = "rgba(0,0,0,0.15)";
-    ctx.lineWidth = 1;
-    if(style==="star") drawStar(ctx, cx, cy, Math.min(w,h*0.4)/2, 5);
-    else drawHeart(ctx, cx, cy, Math.min(w,h*0.4)/2);
-    ctx.fill(); ctx.stroke();
-    ctx.restore();
+    return metrics;
   }
   function drawStar(ctx, cx, cy, r, spikes=5){
     const step = Math.PI / spikes;
@@ -1186,25 +1448,38 @@ export default function App(){
     const keyW = keyWidth(w);
 
     ctx.fillStyle = COLORS.keyShadow; ctx.fillRect(x, y-6, w, 6);
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = COLORS.whiteKey;
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
 
     // 白鍵
     for(let m=minMidi; m<=maxMidi; m++){
       if(!isWhite(m)) continue;
       const keyX = xForMidi(m, w);
-      ctx.fillStyle = COLORS.whiteKey;
-      ctx.fillRect(keyX, y, keyW-1, h);
-      ctx.strokeStyle = COLORS.keyBorder;
-      ctx.strokeRect(keyX, y, keyW-1, h);
+      if (effectLevel === "focus") {
+        ctx.fillStyle = COLORS.whiteKey;
+        ctx.fillRect(keyX, y, keyW, h);
+        ctx.strokeStyle = COLORS.keyBorder;
+        ctx.strokeRect(keyX + 0.5, y + 0.5, keyW - 1, h - 1);
+      } else {
+        drawWhiteKey(ctx, keyX, y, keyW, h, false);
+      }
     }
     // 黒鍵
     for(let m=minMidi; m<=maxMidi; m++){
       if(isWhite(m)) continue;
       const keyX = xForMidi(m, w);
-      const blackW = keyW * 0.7;
-      const blackH = h * 0.62;
+      const blackW = keyW * BLACK_W_RATIO;
+      const blackH = h   * BLACK_H_RATIO;
       const bx = keyX + (keyW - blackW)/2;
-      ctx.fillStyle = COLORS.blackKey;
-      ctx.fillRect(bx, y, blackW, blackH);
+      if (effectLevel === "focus") {
+        ctx.fillStyle = COLORS.blackKey;
+        ctx.fillRect(bx, y, blackW, blackH);
+      } else {
+        drawBlackKey(ctx, bx, y, blackW, blackH, false);
+      }
     }
 
     // アクティブ
@@ -1224,10 +1499,10 @@ export default function App(){
       const base = isW ? COLORS.keyActiveWhite : COLORS.keyActiveBlack;
       ctx.fillStyle = base;
       if(isW){
-        ctx.globalAlpha = 0.35; ctx.fillRect(keyX, y, keyW-1, h);
-        if(flashAlpha>0){ ctx.globalAlpha = 0.35 + 0.35*flashAlpha; ctx.fillRect(keyX, y, keyW-1, h); }
+        ctx.globalAlpha = 0.35; ctx.fillRect(keyX, y, keyW, h);
+        if(flashAlpha>0){ ctx.globalAlpha = 0.35 + 0.35*flashAlpha; ctx.fillRect(keyX, y, keyW, h); }
       }else{
-        const blackW = keyW*0.7, blackH=h*0.62, bx=keyX+(keyW-blackW)/2;
+        const blackW = keyW*BLACK_W_RATIO, blackH=h*BLACK_H_RATIO, bx=keyX+(keyW-blackW)/2;
         ctx.globalAlpha = 0.4; ctx.fillRect(bx, y, blackW, blackH);
         if(flashAlpha>0){ ctx.globalAlpha = 0.4 + 0.35*flashAlpha; ctx.fillRect(bx, y, blackW, blackH); }
       }
@@ -1285,9 +1560,20 @@ export default function App(){
   const fmt = (sec)=>{ const s=Math.max(0, sec|0); const m=(s/60)|0; const r=(s%60).toString().padStart(2,"0"); return `${m}:${r}`; };
   const speedOptions = [0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.85,0.9,1.0];
   const fmtDate = (ts)=>new Date(ts).toLocaleString();
-  const totalDuration = Math.max(durationRef.current, isFinite(endTimeRef.current)?endTimeRef.current:0);
-  const progressRatio = totalDuration>0 ? Math.min(1, playhead/totalDuration) : 0;
-  const progressPercent = Math.round(progressRatio*100);
+  const { totalDuration, progressPercent } = useMemo(() => {
+    const visual = Number.isFinite(visualEnd) ? visualEnd : 0;
+    const total = Math.max(duration, visual);
+    if (total <= 0) {
+      return { totalDuration: 0, progressPercent: 0 };
+    }
+    const ratio = Math.min(1, playhead / total);
+    return { totalDuration: total, progressPercent: Math.round(ratio * 100) };
+  }, [duration, visualEnd, playhead]);
+  const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
+  const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
+  const onlineStatusClass = isOfflineMode
+    ? "bg-rose-600/20 text-rose-200 border border-rose-500/40"
+    : "bg-emerald-600/20 text-emerald-200 border border-emerald-500/40";
 
 
   return (
@@ -1299,11 +1585,25 @@ export default function App(){
             <h1 className="text-xl sm:text-2xl font-semibold leading-tight">🎹 Falling Notes Piano – 視認性UP & 教育特化版</h1>
             <div className="text-xs sm:text-sm text-slate-300 truncate">{name || "No file loaded"}</div>
           </div>
+          <div className="flex items-center gap-2 text-xs sm:text-sm">
+            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full font-medium ${onlineStatusClass}`}>
+              {onlineStatusLabel}
+            </span>
+            {isOfflineMode ? (
+              <span className="text-[11px] sm:text-xs text-amber-200">
+                オフライン中は生成・外部音源・読み込み機能が自動停止します。
+              </span>
+            ) : (
+              <span className="text-[11px] sm:text-xs text-slate-400">
+                ネットワーク接続で生成・外部音源の利用が可能です。
+              </span>
+            )}
+          </div>
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <button
                 className="flex-1 sm:flex-none min-h-[44px] px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
-                disabled={!notes.length || isPlaying || !instReady}
+                disabled={!notes.length || isPlaying}
                 onClick={play}
               >
                 Play
@@ -1345,8 +1645,9 @@ export default function App(){
 
         <div className="space-y-5 pt-6">
           {isOfflineMode && (
-            <div className="text-sm text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-xl px-4 py-3">
-              現在オフラインです。外部音源と生成機能は一時的に無効になります。
+            <div className="text-sm text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-xl px-4 py-3 space-y-1">
+              <p>現在オフラインです。生成と外部音源は一時的に無効になります。</p>
+              <p className="text-xs text-amber-100/80">ローカルMIDIは読み込めます。生成と外部音源は無効です。</p>
             </div>
           )}
 
@@ -1358,9 +1659,16 @@ export default function App(){
             <div className="border-t border-slate-700/60 px-4 sm:px-6 py-4 space-y-4">
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
-                  <label className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm">
+                  <label
+                    className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm"
+                  >
                     Choose MIDI
-                    <input type="file" accept=".mid,.midi" className="hidden" onChange={onFile} />
+                    <input
+                      type="file"
+                      accept=".mid,.midi"
+                      className="hidden"
+                      onChange={onFile}
+                    />
                   </label>
 
                   <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
@@ -1423,6 +1731,7 @@ export default function App(){
                     className="w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
                     onClick={generateAndLoad}
                     disabled={isOfflineMode}
+                    title={offlineDisabledTooltip}
                   >
                     生成 → ロード
                   </button>
@@ -1474,6 +1783,7 @@ export default function App(){
                       value={sound}
                       onChange={e => setSound(e.target.value)}
                       disabled={isOfflineMode}
+                      title={offlineDisabledTooltip}
                     >
                       <option value="synth">Synth (軽量)</option>
                       <option value="piano">Piano</option>
@@ -1565,126 +1875,18 @@ export default function App(){
                       🎉 楽しさ
                     </label>
                   </div>
+                  <label className="flex flex-wrap items-center gap-2 pt-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={loopEnabled}
+                      onChange={e => setLoopEnabled(e.target.checked)}
+                    />
+                    <span className="opacity-80">ループ再生</span>
+                    <span className="text-xs text-slate-400">(検証用・長時間再生)</span>
+                  </label>
                 </div>
               </div>
 
-              <div className="border-t border-slate-700 pt-3 space-y-2 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">オフライン準備</span>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-xs ${offlineReady ? "bg-emerald-600/30 text-emerald-100" : "bg-amber-600/30 text-amber-100"}`}
-                  >
-                    {offlineReady ? "OK" : "未準備"}
-                  </span>
-                  {offlineStatusDetail?.missing?.length ? (
-                    <span className="text-xs text-amber-200">不足 {offlineStatusDetail.missing.length} 件</span>
-                  ) : (
-                    <span className="text-xs opacity-70">必須ファイルは取得済み</span>
-                  )}
-                  {offlineStatusDetail?.error && <span className="text-xs text-rose-300">{offlineStatusDetail.error}</span>}
-                  {swVersion && <span className="ml-auto text-xs opacity-70">SW {swVersion}</span>}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    className="min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={handleManualPrecache}
-                    disabled={precacheState.status === "running"}
-                  >
-                    オフライン準備を手動実行
-                  </button>
-                  {precacheState.status === "running" && <span className="text-xs text-amber-200">キャッシュ中…</span>}
-                  {precacheState.status === "done" && (
-                    <span className="text-xs text-emerald-300">
-                      完了 ({precacheState.detail?.cached ?? 0}/{precacheState.detail?.total ?? 0})
-                    </span>
-                  )}
-                  {precacheState.status === "error" && <span className="text-xs text-rose-300">失敗しました</span>}
-                </div>
-
-                <div className="text-xs">
-                  <button className="underline decoration-dotted" onClick={() => setDevPanelOpen(v => !v)}>
-                    開発者メニューを{devPanelOpen ? "閉じる" : "開く"}
-                  </button>
-                </div>
-
-                {devPanelOpen && (
-                  <div className="space-y-3 rounded-2xl bg-slate-900/40 p-3 text-xs">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button className="px-3 py-2 rounded bg-slate-700 hover:bg-slate-600" onClick={refreshCacheReport}>
-                        再読込
-                      </button>
-                      <button
-                        className="px-3 py-2 rounded bg-rose-700 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={handlePurgeCaches}
-                        disabled={purgeState?.status === "running"}
-                      >
-                        キャッシュ全削除
-                      </button>
-                      {purgeState?.status === "running" && <span className="text-amber-200">削除中…</span>}
-                      {purgeState?.status === "done" && (
-                        <span className="text-emerald-300">削除完了 ({purgeState.detail?.deleted ?? 0})</span>
-                      )}
-                      {purgeState?.status === "error" && <span className="text-rose-300">削除失敗</span>}
-                    </div>
-
-                    {cacheError && <div className="text-rose-300">キャッシュ取得に失敗しました: {cacheError}</div>}
-
-                    <div className="space-y-2 max-h-60 overflow-auto pr-1">
-                      {cacheReport.length === 0 && !cacheError && <div className="opacity-70">キャッシュは存在しません。</div>}
-                      {cacheReport.map(cache => (
-                        <div key={cache.name} className="rounded-xl bg-slate-800/70 p-2 space-y-1">
-                          <div className="font-semibold">{cache.name}</div>
-                          <div className="text-[11px] opacity-70">{cache.humanTotal} / {cache.entries.length} items</div>
-                          <ul className="space-y-1 max-h-28 overflow-auto pr-1">
-                            {cache.entries.map(entry => {
-                              let label = entry.url;
-                              if (typeof window !== "undefined") {
-                                try {
-                                  const parsed = new URL(entry.url);
-                                  label = parsed.pathname + parsed.search;
-                                } catch {}
-                              }
-                              return (
-                                <li key={entry.url} className="flex items-center gap-2 text-[11px]">
-                                  <span className="flex-1 truncate">{label}</span>
-                                  <span className="opacity-70 whitespace-nowrap">{entry.humanSize}</span>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      ))}
-                    </div>
-
-                    {offlineStatusDetail?.missing?.length > 0 && (
-                      <div>
-                        <div className="font-semibold">不足中の必須ファイル</div>
-                        <ul className="list-disc list-inside space-y-1">
-                          {offlineStatusDetail.missing.map(item => (
-                            <li key={item} className="opacity-80">
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-
-                    {offlineStatusDetail?.uncachedHints?.length > 0 && (
-                      <div>
-                        <div className="font-semibold">未キャッシュのアセット候補</div>
-                        <ul className="list-disc list-inside space-y-1">
-                          {offlineStatusDetail.uncachedHints.map(item => (
-                            <li key={item} className="opacity-80">
-                              {item}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           </details>
 
@@ -1833,6 +2035,8 @@ export default function App(){
           </div>
         </div>
       </div>
+
+      <DevStatsOverlay visible={isDevEnvironment && devPanelOpen} fps={frameStats.fps} drops={frameStats.drops} />
 
       {libOpen && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
