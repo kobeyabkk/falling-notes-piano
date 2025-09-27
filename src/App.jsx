@@ -1590,6 +1590,41 @@ useEffect(() => {
       }
     }
 
+
+    // ★ここに追加：白鍵の境界線を上部まで描画
+    {
+      const blackHeight = h * BLACK_H_RATIO;
+      ctx.save();
+      ctx.strokeStyle = COLORS.keyBorder;  // 既存の境界線色を使用
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.8;  // 自然な見た目のため少し透過
+
+      // 白鍵同士の境界に縦線を描画
+      ctx.beginPath();
+      for (let m = minMidi; m <= maxMidi; m++) {
+        const layout = keyLayout.get(m);
+        if (!layout || !layout.isWhite) continue;
+
+        // 各白鍵の右端に縦線（最後の白鍵は除く）
+        const isLastWhiteKey = (() => {
+          for (let nextM = m + 1; nextM <= maxMidi; nextM++) {
+            const nextLayout = keyLayout.get(nextM);
+            if (nextLayout && nextLayout.isWhite) return false;
+          }
+          return true;
+        })();
+
+        if (!isLastWhiteKey) {
+          const rightEdge = layout.x + layout.w - 0.5;
+          ctx.moveTo(rightEdge, y);
+          ctx.lineTo(rightEdge, y + blackHeight);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+
     // 9. アクティブ表示（新しいレイアウトに対応）
     const active = new Set();
     for(const [id, landedAt] of landedAtRef.current){
