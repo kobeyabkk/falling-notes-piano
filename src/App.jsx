@@ -80,6 +80,7 @@ function addRoundedRectPath(ctx, x, y, w, h) {
   ctx.closePath();
 }
 
+
 // key proportions & skin
 const BLACK_W_RATIO = 0.66;   // 黒鍵の横幅（白鍵比）
 const BLACK_H_RATIO = 0.62;   // 黒鍵の縦の長さ（鍵盤高さ比）
@@ -146,6 +147,7 @@ function drawBlackKey(ctx, x, y, w, h, active = false) {
   ctx.lineWidth = 1;
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 }
+
 
 function getNow() {
   return typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -358,6 +360,7 @@ export default function App(){
     }
   }, [devPanelOpen]);
 
+
 useEffect(() => {
   const ua = (typeof navigator !== "undefined" && (navigator.userAgent || "")) || "";
   // ゆるめの判定：iPad かつ古めの OS / 旧世代機っぽい場合
@@ -365,6 +368,7 @@ useEffect(() => {
     /iPad/i.test(ua) && (/(OS 1[2-4]_|\bCPU OS 1[2-4]_)/i.test(ua) || /A10|A10X|A9|A8/i.test(ua));
   Tone.Transport.scheduleAheadTime = looksOldiPad ? 0.38 : 0.22;
 }, []);
+
 
   // timing
   const playheadRef = useRef(0);
@@ -390,6 +394,7 @@ useEffect(() => {
 
   async function ensureAudioReady() {
     try {
+
       await Tone?.start?.();
       await Tone?.getContext?.()?.rawContext?.resume?.();
       console.log("[audio] unlocked");
@@ -397,6 +402,7 @@ useEffect(() => {
     } catch (e) {
       console.warn("[audio] unlock failed:", e);
       return false;
+
     }
   }
 
@@ -463,6 +469,7 @@ useEffect(() => {
     if (metrics.drawnNotes <= 0) return SLOW_FRAME_INTERVAL;
     if (metrics.drawnNotes < 6 && metrics.nearKeyline < 2) return MEDIUM_FRAME_INTERVAL;
     return FAST_FRAME_INTERVAL;
+
   }
 
   // hit state
@@ -925,6 +932,7 @@ useEffect(() => {
 
   // -------- transport --------
   async function play(){
+
     await ensureAudioReady();
     if(!masterRef.current) masterRef.current = new Tone.Gain(0.9).toDestination();
     if(!busRef.current)    busRef.current    = new Tone.Gain(1).connect(masterRef.current);
@@ -948,6 +956,7 @@ useEffect(() => {
       if(instrumentRef.current?.inst){
         setInstReady(true);
       }
+
     }
     cancelRAF();
     requestFrameBoost();
@@ -1564,6 +1573,7 @@ useEffect(() => {
     const ratio = Math.min(1, playhead / total);
     return { totalDuration: total, progressPercent: Math.round(ratio * 100) };
   }, [duration, visualEnd, playhead]);
+
   const offlineDisabledTooltip = isOfflineMode ? "オフラインでは生成と外部音源が利用できません" : undefined;
   const onlineStatusLabel = isOfflineMode ? "🔴オフライン" : "🟢オンライン";
   const onlineStatusClass = isOfflineMode
@@ -1655,7 +1665,9 @@ useEffect(() => {
               <div className="flex flex-col gap-3">
                 <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3">
                   <label
+
                     className="inline-flex items-center justify-center w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-slate-700 hover:bg-slate-600 cursor-pointer transition shadow-sm"
+
                   >
                     Choose MIDI
                     <input
@@ -2084,36 +2096,6 @@ useEffect(() => {
                   今すぐ更新
                 </button>
                 <button className="px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600" onClick={dismissUpdateToast}>
-                  あとで
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {updateToast && (
-        <div className="fixed inset-x-0 bottom-4 z-50 px-4 flex justify-center">
-          <div className="bg-slate-900/95 border border-slate-700 text-slate-100 rounded-2xl px-4 py-3 shadow-xl flex flex-wrap items-center gap-3 max-w-xl w-full">
-            <div className="flex-1 text-sm">
-              {updateToast.status === "applying"
-                ? "更新を適用中です…数秒お待ちください。"
-                : "新しいバージョンがあります。更新しますか？"}
-            </div>
-            {updateToast.status === "applying" ? (
-              <span className="text-xs opacity-70">反映中…</span>
-            ) : (
-              <>
-                <button
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500"
-                  onClick={handleUpdateNow}
-                >
-                  今すぐ更新
-                </button>
-                <button
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600"
-                  onClick={dismissUpdateToast}
-                >
                   あとで
                 </button>
               </>
