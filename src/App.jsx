@@ -312,6 +312,7 @@ export default function App(){
   const [genTempo, setGenTempo] = useState(90);          // bpm
   const [genBars, setGenBars] = useState(4);             // 小節数
   const [genDifficulty, setGenDifficulty] = useState(0); // 0..3
+  const [genType, setGenType] = useState("random");      // random | twinkle | butterfly
 
   // library UI
   const [libOpen, setLibOpen] = useState(false);
@@ -820,6 +821,19 @@ useEffect(() => {
     return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
   }
 
+  const pdPatterns = [
+    {
+      name: "きらきら星",
+      notes: [60, 60, 67, 67, 65, 65, 67, 0, 65, 65, 64, 64, 62, 62, 60, 0],
+      durations: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5],
+    },
+    {
+      name: "ちょうちょう",
+      notes: [60, 62, 64, 65, 64, 62, 60, 0, 62, 64, 62, 64, 62, 0, 60, 0],
+      durations: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 1, 0.5],
+    },
+  ];
+
   const KEY_TO_SEMITONE = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
   function buildScaleIntervals(scale){
     return scale==="minor" ? [0,2,3,5,7,8,10,12] : [0,2,4,5,7,9,11,12]; // 自然的短音階/長音階
@@ -838,42 +852,60 @@ useEffect(() => {
       midi.header.setTempo(tempo);
 
       if(difficulty === 0){
-        const beginnerPatterns = [
-          [60, 60, 67, 67, 65, 65, 67, 0, 65, 65, 64, 64, 62, 62, 60, 0],
-          [60, 62, 64, 65, 67, 0, 67, 65, 64, 62, 60, 0, 60, 0, 60, 0],
-          [60, 0, 64, 0, 67, 0, 60, 0, 60, 0, 64, 0, 67, 0, 60, 0],
-        ];
-        const selectedPattern = beginnerPatterns[Math.floor(Math.random() * beginnerPatterns.length)];
+        const patternSelection =
+          genType === "twinkle"
+            ? pdPatterns.find(p => p.name === "きらきら星")
+            : genType === "butterfly"
+            ? pdPatterns.find(p => p.name === "ちょうちょう")
+            : randomChoice(pdPatterns);
+
+        const selectedPattern = patternSelection || pdPatterns[0];
         const secondsPerBeat = 60 / tempo;
+        const beatsPerBar = 4;
+        const targetBeats = beatsPerBar * 4; // 4 bars fixed for beginner mode
 
         const rightTrack = midi.addTrack();
-        rightTrack.name = "Beginner Right";
-        selectedPattern.forEach((pitch, idx) => {
-          if(pitch !== 0){
+        rightTrack.name = `${selectedPattern.name} Melody`;
+
+        let beatCursor = 0;
+        let idx = 0;
+        const notesLength = selectedPattern.notes.length;
+        while (beatCursor < targetBeats - 1e-6 && notesLength > 0){
+          const patIndex = idx % notesLength;
+          const pitch = selectedPattern.notes[patIndex];
+          const rawDuration = selectedPattern.durations?.[patIndex] ?? 0.5;
+          const safeDuration = Math.max(rawDuration, 0.25);
+          const remainingBeats = targetBeats - beatCursor;
+          const beatDuration = Math.min(safeDuration, remainingBeats);
+
+          if(pitch !== 0 && beatDuration > 1e-6){
             rightTrack.addNote({
               midi: pitch,
-              time: idx * secondsPerBeat,
-              duration: secondsPerBeat,
+              time: beatCursor * secondsPerBeat,
+              duration: beatDuration * secondsPerBeat,
               velocity: 0.8,
             });
           }
-        });
+
+          beatCursor += beatDuration;
+          idx += 1;
+        }
 
         const leftTrack = midi.addTrack();
-        leftTrack.name = "Beginner Left";
-        const bassNotes = [48, 53, 55, 48];
+        leftTrack.name = `${selectedPattern.name} Bass`;
+        const bassNotes = [48, 53, 55, 48]; // C3 - F3 - G3 - C3
         bassNotes.forEach((bassMidi, bar) => {
           leftTrack.addNote({
             midi: bassMidi,
-            time: bar * 4 * secondsPerBeat,
-            duration: 4 * secondsPerBeat,
+            time: bar * beatsPerBar * secondsPerBeat,
+            duration: beatsPerBar * secondsPerBeat,
             velocity: 0.7,
           });
         });
 
         const bytes = midi.toArray();
         await loadMidiFromBytes(toArrayBufferFromU8(bytes));
-        setName("C_beginner_4bars.mid");
+        setName(`${selectedPattern.name}_beginner.mid`);
         return;
       }
 
@@ -1943,6 +1975,20 @@ useEffect(() => {
                       <option value={1}>やさしい</option>
                       <option value={2}>ふつう</option>
                       <option value={3}>むずかしい</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
+                    <span className="opacity-80">パターン</span>
+                    <select
+                      className="bg-slate-700 rounded-xl px-3 h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+                      value={genType}
+                      onChange={e => setGenType(e.target.value)}
+                      disabled={genDifficulty !== 0}
+                    >
+                      <option value="random">🎲 ランダム</option>
+                      <option value="twinkle">きらきら星</option>
+                      <option value="butterfly">ちょうちょう</option>
                     </select>
                   </div>
 
