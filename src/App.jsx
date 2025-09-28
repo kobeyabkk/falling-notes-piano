@@ -838,43 +838,35 @@ useEffect(() => {
       midi.header.setTempo(tempo);
 
       if(difficulty === 0){
-        const beatsToSeconds = (beat) => (beat * 60) / tempo;
+        const beginnerPatterns = [
+          [60, 60, 67, 67, 65, 65, 67, 0, 65, 65, 64, 64, 62, 62, 60, 0],
+          [60, 62, 64, 65, 67, 0, 67, 65, 64, 62, 60, 0, 60, 0, 60, 0],
+          [60, 0, 64, 0, 67, 0, 60, 0, 60, 0, 64, 0, 67, 0, 60, 0],
+        ];
+        const selectedPattern = beginnerPatterns[Math.floor(Math.random() * beginnerPatterns.length)];
+        const secondsPerBeat = 60 / tempo;
+
         const rightTrack = midi.addTrack();
         rightTrack.name = "Beginner Right";
+        selectedPattern.forEach((pitch, idx) => {
+          if(pitch !== 0){
+            rightTrack.addNote({
+              midi: pitch,
+              time: idx * secondsPerBeat,
+              duration: secondsPerBeat,
+              velocity: 0.8,
+            });
+          }
+        });
+
         const leftTrack = midi.addTrack();
         leftTrack.name = "Beginner Left";
-
-        const whitePitches = [60, 62, 64, 65, 67];
-        let idx = 0;
-        for(let beat = 0; beat < 16; beat++){
-          if(beat === 15){
-            idx = 0; // 最終音はC4で着地
-          }else{
-            const moves = [idx];
-            if(idx > 0) moves.push(idx - 1);
-            if(idx < whitePitches.length - 1) moves.push(idx + 1);
-            const weighted = [];
-            for(const m of moves){
-              weighted.push(m);
-              if(m !== idx) weighted.push(m); // 隣接音を優先
-            }
-            idx = randomChoice(weighted);
-          }
-          const midiNote = whitePitches[idx];
-          rightTrack.addNote({
-            midi: midiNote,
-            time: beatsToSeconds(beat),
-            duration: beatsToSeconds(1),
-            velocity: 0.85,
-          });
-        }
-
-        const leftPattern = [48, 53, 55, 48];
-        leftPattern.forEach((midiNote, barIdx) => {
+        const bassNotes = [48, 53, 55, 48];
+        bassNotes.forEach((bassMidi, bar) => {
           leftTrack.addNote({
-            midi: midiNote,
-            time: beatsToSeconds(barIdx * 4),
-            duration: beatsToSeconds(4),
+            midi: bassMidi,
+            time: bar * 4 * secondsPerBeat,
+            duration: 4 * secondsPerBeat,
             velocity: 0.7,
           });
         });
