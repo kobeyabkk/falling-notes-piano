@@ -14,6 +14,9 @@ const A0_MIDI = 21;
 const C8_MIDI = A0_MIDI + KEY_COUNT - 1;
 const MIDDLE_C = 60;
 
+const MIN_VISIBLE_KEYS = 48;   // 最小表示鍵数（最大ズーム）
+const MAX_VISIBLE_KEYS = KEY_COUNT; // 既存の上限そのまま
+
 const NOTE_MIN_HEIGHT = 10;
 const SPEED = 140;     // px/sec
 const KB_HEIGHT = 140; // keyboard height (px)
@@ -238,9 +241,47 @@ function nameDoReMi(midi){
 // range helpers
 const clampMidi = (m)=>clamp(m, A0_MIDI, C8_MIDI);
 function centerPresetRange(centerMidi, keyCount){
-  const half = Math.floor((keyCount-1)/2);
-  const min = clampMidi(centerMidi - half);
-  const max = clampMidi(min + keyCount - 1);
+  const span = clamp(Math.round(keyCount), MIN_VISIBLE_KEYS, MAX_VISIBLE_KEYS);
+  const clampedCenter = clampMidi(centerMidi);
+  const half = Math.floor((span - 1) / 2);
+  let min = clampedCenter - half;
+  let max = min + span - 1;
+
+  if (min < A0_MIDI) {
+    min = A0_MIDI;
+    max = min + span - 1;
+  }
+  if (max > C8_MIDI) {
+    max = C8_MIDI;
+    min = max - span + 1;
+  }
+
+  min = clampMidi(min);
+  max = clampMidi(max);
+
+  // 端で切れた場合でも span を維持
+  if (max - min + 1 < span) {
+    if (min === A0_MIDI) {
+      max = clampMidi(min + span - 1);
+    } else if (max === C8_MIDI) {
+      min = clampMidi(max - span + 1);
+    }
+  }
+
+  return { minMidi:min, maxMidi:max };
+}
+function normalizeVisibleRange(minMidi, maxMidi, desiredSpan = MIN_VISIBLE_KEYS){
+  let min = clampMidi(Math.min(minMidi, maxMidi));
+  let max = clampMidi(Math.max(minMidi, maxMidi));
+  const span = max - min + 1;
+  if(span < desiredSpan){
+    const center = Math.round((min + max) / 2);
+    return centerPresetRange(center, desiredSpan);
+  }
+  if(span > MAX_VISIBLE_KEYS){
+    const center = Math.round((min + max) / 2);
+    return centerPresetRange(center, MAX_VISIBLE_KEYS);
+  }
   return { minMidi:min, maxMidi:max };
 }
 function analyzeNoteRangeAuto(notes){
@@ -248,12 +289,7 @@ function analyzeNoteRangeAuto(notes){
   let min=Infinity, max=-Infinity;
   for(const n of notes){ if(n.midi<min) min=n.midi; if(n.midi>max) max=n.midi; }
   min = clampMidi(min-3); max = clampMidi(max+3);
-  const minWidth = 24;
-  if(max-min+1 < minWidth){
-    const center = (min+max)/2|0;
-    return centerPresetRange(center, minWidth);
-  }
-  return { minMidi:min, maxMidi:max };
+  return normalizeVisibleRange(min, max);
 }
 
 // ---------- particles / ripples / aura ----------
@@ -993,14 +1029,22 @@ useEffect(() => {
   }
 
   function applyRangePreset(preset, src){
+    let effective = preset;
+    if(effective === "24") effective = "48";
+
     let range;
-    if(preset==="auto") range = analyzeNoteRangeAuto(src);
-    else if(preset==="24") range = centerPresetRange(MIDDLE_C, 24);
-    else if(preset==="48") range = centerPresetRange(MIDDLE_C, 48);
-    else if(preset==="61") range = centerPresetRange(MIDDLE_C, 61);
+    if(effective === "auto") range = analyzeNoteRangeAuto(src);
+    else if(effective === "48") range = centerPresetRange(MIDDLE_C, 48);
+    else if(effective === "61") range = centerPresetRange(MIDDLE_C, 61);
+    else if(effective === "76") range = centerPresetRange(MIDDLE_C, 76);
+    else if(effective === "88") range = centerPresetRange(MIDDLE_C, 88);
     else range = { minMidi:A0_MIDI, maxMidi:C8_MIDI };
-    setViewMinMidi(range.minMidi);
-    setViewMaxMidi(range.maxMidi);
+
+    const normalized = normalizeVisibleRange(range.minMidi, range.maxMidi);
+    setViewMinMidi(normalized.minMidi);
+    setViewMaxMidi(normalized.maxMidi);
+
+    if(effective !== preset) setRangePreset(effective);
   }
   useEffect(()=>{ applyRangePreset(rangePreset, notes); },[rangePreset]);
 
@@ -2088,9 +2132,9 @@ useEffect(() => {
                       onChange={e => setRangePreset(e.target.value)}
                     >
                       <option value="auto">Auto（楽曲解析）</option>
-                      <option value="24">24鍵（幼児）</option>
-                      <option value="48">48鍵（小学生）</option>
+                      <option value="48">48鍵（入門）</option>
                       <option value="61">61鍵（標準）</option>
+                      <option value="76">76鍵（拡張）</option>
                       <option value="88">88鍵（フル）</option>
                     </select>
                   </div>
