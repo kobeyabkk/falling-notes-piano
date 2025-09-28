@@ -310,8 +310,8 @@ export default function App(){
   const [genKey, setGenKey] = useState("C");             // C,D,E,F,G,A,B
   const [genScale, setGenScale] = useState("major");     // major | minor
   const [genTempo, setGenTempo] = useState(90);          // bpm
-  const [genBars, setGenBars] = useState(8);             // 小節数
-  const [genDifficulty, setGenDifficulty] = useState(2); // 1..3
+  const [genBars, setGenBars] = useState(4);             // 小節数
+  const [genDifficulty, setGenDifficulty] = useState(0); // 0..3
 
   // library UI
   const [libOpen, setLibOpen] = useState(false);
@@ -831,13 +831,63 @@ useEffect(() => {
   async function generateAndLoad() {
     try {
       const tempo = clamp(genTempo, 50, 160);
-      const bars = clamp(genBars, 2, 32);
-      const difficulty = clamp(genDifficulty, 1, 3);
+      const requestedBars = clamp(genBars, 2, 32);
+      const difficulty = clamp(genDifficulty, 0, 3);
 
       const midi = new Midi();
       midi.header.setTempo(tempo);
 
+      if(difficulty === 0){
+        const beatsToSeconds = (beat) => (beat * 60) / tempo;
+        const rightTrack = midi.addTrack();
+        rightTrack.name = "Beginner Right";
+        const leftTrack = midi.addTrack();
+        leftTrack.name = "Beginner Left";
+
+        const whitePitches = [60, 62, 64, 65, 67];
+        let idx = 0;
+        for(let beat = 0; beat < 16; beat++){
+          if(beat === 15){
+            idx = 0; // 最終音はC4で着地
+          }else{
+            const moves = [idx];
+            if(idx > 0) moves.push(idx - 1);
+            if(idx < whitePitches.length - 1) moves.push(idx + 1);
+            const weighted = [];
+            for(const m of moves){
+              weighted.push(m);
+              if(m !== idx) weighted.push(m); // 隣接音を優先
+            }
+            idx = randomChoice(weighted);
+          }
+          const midiNote = whitePitches[idx];
+          rightTrack.addNote({
+            midi: midiNote,
+            time: beatsToSeconds(beat),
+            duration: beatsToSeconds(1),
+            velocity: 0.85,
+          });
+        }
+
+        const leftPattern = [48, 53, 55, 48];
+        leftPattern.forEach((midiNote, barIdx) => {
+          leftTrack.addNote({
+            midi: midiNote,
+            time: beatsToSeconds(barIdx * 4),
+            duration: beatsToSeconds(4),
+            velocity: 0.7,
+          });
+        });
+
+        const bytes = midi.toArray();
+        await loadMidiFromBytes(toArrayBufferFromU8(bytes));
+        setName("C_beginner_4bars.mid");
+        return;
+      }
+
       const tr = midi.addTrack();
+      const bars = requestedBars;
+      const effDifficulty = clamp(difficulty, 1, 3);
       const rootSemitone = KEY_TO_SEMITONE[genKey] ?? 0;
       const scale = buildScaleIntervals(genScale);
       const rootOct = 60; // C4を基準、選んだキーにシフト
@@ -845,8 +895,8 @@ useEffect(() => {
       // リズム：難易度で密度を切替
       // diff=1: 1/2音符中心, diff=2: 1/4中心, diff=3: 1/8混在
       const rhythmPool =
-        difficulty===1 ? [1.0, 0.5, 0.5, 1.0] :
-        difficulty===2 ? [0.5, 0.5, 0.25, 0.25, 1.0] :
+        effDifficulty===1 ? [1.0, 0.5, 0.5, 1.0] :
+        effDifficulty===2 ? [0.5, 0.5, 0.25, 0.25, 1.0] :
                          [0.25, 0.25, 0.5, 0.25, 0.125, 0.375];
 
       // メロディ方針：スケール内を小さな歩幅でランダムウォーク（跳躍抑制）、小節末は着地
@@ -871,14 +921,14 @@ useEffect(() => {
           degreeIdx = clamp(degreeIdx + step, 0, scale.length-1);
           currentMidi = clampToRange(rootOct + rootSemitone + scale[degreeIdx]);
           // たまにオクターブ上げ下げ（難易度3のみ）
-          if(difficulty===3 && Math.random()<0.15){
+          if(effDifficulty===3 && Math.random()<0.15){
             const up = Math.random()<0.5 ? -12 : 12;
             currentMidi = clampToRange(currentMidi + up);
           }
         }
 
         // 休符：難易度1で少なめ、3でやや多め
-        const restProb = difficulty===1 ? 0.05 : difficulty===2 ? 0.1 : 0.15;
+        const restProb = effDifficulty===1 ? 0.05 : effDifficulty===2 ? 0.1 : 0.15;
         const isRest = Math.random() < restProb;
 
         if(!isRest){
@@ -1532,31 +1582,29 @@ useEffect(() => {
       }
     }
 
-
-    // 4. 黒鍵の位置（境界白鍵が画面外でも必ず描画）
+    // 4. 黒鍵の位置を計算
     for (let m = minMidi; m <= maxMidi; m++) {
-      if (isWhite(m)) continue;
+      if (!isWhite(m)) {
+        const blackKeyWidth = whiteKeyWidth * BLACK_W_RATIO;
+        const blackKeyHeight = h * BLACK_H_RATIO;
 
-      const bw = whiteKeyWidth * BLACK_W_RATIO;
-      const bh = h * BLACK_H_RATIO;
+        let leftWhite = m - 1;
+        while (leftWhite >= minMidi && !isWhite(leftWhite)) {
+          leftWhite--;
+        }
 
-      // search neighbor white keys (even if they are offscreen)
-      let L = m - 1; while (L >= minMidi && !isWhite(L)) L--;
-      let R = m + 1; while (R <= maxMidi && !isWhite(R)) R++;
+        if (leftWhite >= minMidi && whiteKeyPositions.has(leftWhite)) {
+          const leftWhiteX = whiteKeyPositions.get(leftWhite);
+          const blackKeyX = leftWhiteX + whiteKeyWidth - (blackKeyWidth / 2);
 
-      // anchor to whichever boundary is visible in this range
-      let boundaryX = null;
-      if (L >= minMidi && whiteKeyPositions.has(L)) {
-        // right edge of the left white key
-        boundaryX = whiteKeyPositions.get(L) + whiteKeyWidth;
-      } else if (R <= maxMidi && whiteKeyPositions.has(R)) {
-        // left edge of the right white key
-        boundaryX = whiteKeyPositions.get(R);
-      }
-
-      if (boundaryX != null) {
-        keyLayout.set(m, { x: boundaryX - bw / 2, y, w: bw, h: bh, isWhite: false });
-
+          keyLayout.set(m, {
+            x: blackKeyX,
+            y: y,
+            w: blackKeyWidth,
+            h: blackKeyHeight,
+            isWhite: false
+          });
+        }
       }
     }
 
@@ -1564,28 +1612,63 @@ useEffect(() => {
     ctx.fillStyle = COLORS.keyShadow;
     ctx.fillRect(x, y - 6, w, 6);
 
-    // 6. 黒鍵の高さまで白い下地を一度だけ敷く
-    const blackHeight = h * BLACK_H_RATIO;
-    const plateHeight = Math.ceil(blackHeight + 6);
-    ctx.fillStyle = COLORS.whiteKey;
-    ctx.fillRect(x, y, w, plateHeight);
+    // 6. 【下レイヤー】白鍵を完全な長方形として境界線付きで描画
+    ctx.save();
 
-    // 7. 白鍵の描画
     for (let m = minMidi; m <= maxMidi; m++) {
       const layout = keyLayout.get(m);
       if (!layout || !layout.isWhite) continue;
 
       if (effectLevel === "focus") {
+        // シンプルモード：白鍵本体
         ctx.fillStyle = COLORS.whiteKey;
-        ctx.fillRect(layout.x, layout.y, layout.w - 1, layout.h);
+        ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
+
+        // 完全な境界線（上から下まで、左右も含む）
         ctx.strokeStyle = COLORS.keyBorder;
-        ctx.strokeRect(layout.x, layout.y, layout.w - 1, layout.h);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(layout.x + 0.5, layout.y + 0.5, layout.w - 1, layout.h - 1);
       } else {
-        drawWhiteKey(ctx, layout.x, layout.y, layout.w, layout.h, false);
+        // 高品質モード：まず基本の長方形を描画
+        ctx.fillStyle = COLORS.whiteKey;
+        ctx.beginPath();
+        drawRoundedRect(ctx, layout.x, layout.y, layout.w - 1, layout.h, 5);
+        ctx.fill();
+
+        // 境界線
+        ctx.strokeStyle = COLORS.keyBorder;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // その後、質感を追加（drawWhiteKeyの内容を適用）
+        const g = ctx.createLinearGradient(layout.x, layout.y, layout.x, layout.y + layout.h);
+        g.addColorStop(0, "#f7f9fb");
+        g.addColorStop(0.5, "#eef2f7");
+        g.addColorStop(1, "#e3e8ef");
+        ctx.fillStyle = g;
+        ctx.fill();
+
+        // 内側の影
+        const side = ctx.createLinearGradient(layout.x, layout.y, layout.x + layout.w, layout.y);
+        side.addColorStop(0.0, "rgba(0,0,0,0.10)");
+        side.addColorStop(0.08, "rgba(0,0,0,0.00)");
+        side.addColorStop(0.92, "rgba(0,0,0,0.00)");
+        side.addColorStop(1.0, "rgba(0,0,0,0.10)");
+        ctx.fillStyle = side;
+        ctx.fillRect(layout.x, layout.y, layout.w - 1, layout.h);
+
+        // 光沢
+        const gloss = ctx.createLinearGradient(layout.x, layout.y, layout.x, layout.y + layout.h * 0.28);
+        gloss.addColorStop(0, "rgba(255,255,255,0.65)");
+        gloss.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = gloss;
+        ctx.fillRect(layout.x + 1, layout.y + 1, layout.w - 3, layout.h * 0.28);
       }
     }
 
-    // 8. 黒鍵の描画（白鍵の上に重ねる）
+    ctx.restore();
+
+    // 7. 【上レイヤー】黒鍵を描画（白鍵の境界線を隠す）
     for (let m = minMidi; m <= maxMidi; m++) {
       const layout = keyLayout.get(m);
       if (!layout || layout.isWhite) continue;
@@ -1598,45 +1681,10 @@ useEffect(() => {
       }
     }
 
-
-    // ★ここに追加：白鍵の境界線を上部まで描画
-    {
-      const blackHeight = h * BLACK_H_RATIO;
-      ctx.save();
-      ctx.strokeStyle = COLORS.keyBorder;  // 既存の境界線色を使用
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.8;  // 自然な見た目のため少し透過
-
-      // 白鍵同士の境界に縦線を描画
-      ctx.beginPath();
-      for (let m = minMidi; m <= maxMidi; m++) {
-        const layout = keyLayout.get(m);
-        if (!layout || !layout.isWhite) continue;
-
-        // 各白鍵の右端に縦線（最後の白鍵は除く）
-        const isLastWhiteKey = (() => {
-          for (let nextM = m + 1; nextM <= maxMidi; nextM++) {
-            const nextLayout = keyLayout.get(nextM);
-            if (nextLayout && nextLayout.isWhite) return false;
-          }
-          return true;
-        })();
-
-        if (!isLastWhiteKey) {
-          const rightEdge = layout.x + layout.w - 0.5;
-          ctx.moveTo(rightEdge, y);
-          ctx.lineTo(rightEdge, y + blackHeight);
-        }
-      }
-      ctx.stroke();
-      ctx.restore();
-    }
-
-
-    // 9. アクティブ表示（新しいレイアウトに対応）
+    // 8. アクティブ表示
     const active = new Set();
     for(const [id, landedAt] of landedAtRef.current){
-      const n = allNotes[id]; 
+      const n = allNotes[id];
       if(!n) continue;
       if(n.midi < minMidi || n.midi > maxMidi) continue;
       const litUntil = landedAt + Math.max(MIN_LIT_SEC, (n.end-n.start)/rateRef.current);
@@ -1654,24 +1702,24 @@ useEffect(() => {
       ctx.fillStyle = base;
 
       if(layout.isWhite){
-        ctx.globalAlpha = 0.35; 
-        ctx.fillRect(layout.x, layout.y, layout.w - 1, layout.h);
-        if(flashAlpha > 0){ 
-          ctx.globalAlpha = 0.35 + 0.35 * flashAlpha; 
-          ctx.fillRect(layout.x, layout.y, layout.w - 1, layout.h); 
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
+        if(flashAlpha > 0){
+          ctx.globalAlpha = 0.35 + 0.35 * flashAlpha;
+          ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
         }
       } else {
-        ctx.globalAlpha = 0.4; 
+        ctx.globalAlpha = 0.4;
         ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
-        if(flashAlpha > 0){ 
-          ctx.globalAlpha = 0.4 + 0.35 * flashAlpha; 
-          ctx.fillRect(layout.x, layout.y, layout.w, layout.h); 
+        if(flashAlpha > 0){
+          ctx.globalAlpha = 0.4 + 0.35 * flashAlpha;
+          ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
         }
       }
       ctx.globalAlpha = 1;
     }
 
-    // 10. Cマーカー（新しいレイアウトに対応）
+    // 9. Cマーカー
     ctx.save();
     for(let m = minMidi; m <= maxMidi; m++){
       if(m % 12 !== 0) continue;
@@ -1700,14 +1748,14 @@ useEffect(() => {
     }
     ctx.restore();
 
-    // 11. ラベル（新しいレイアウトに対応）
+    // 10. ラベル
     if(labelMode !== "none"){
       ctx.save();
       ctx.fillStyle = COLORS.label;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = "11px ui-sans-serif, system-ui";
-      
+
       for(let m = minMidi; m <= maxMidi; m++){
         const layout = keyLayout.get(m);
         if(!layout || !layout.isWhite) continue;
@@ -1885,7 +1933,7 @@ useEffect(() => {
                       max={32}
                       className="w-full sm:w-24 bg-slate-700 rounded-xl px-3 h-11"
                       value={genBars}
-                      onChange={e => setGenBars(parseInt(e.target.value || "8"))}
+                      onChange={e => setGenBars(parseInt(e.target.value || "4"))}
                     />
                   </div>
 
@@ -1897,6 +1945,7 @@ useEffect(() => {
                       value={genDifficulty}
                       onChange={e => setGenDifficulty(parseInt(e.target.value))}
                     >
+                      <option value={0}>🎯 初心者（4小節・白鍵のみ）</option>
                       <option value={1}>やさしい</option>
                       <option value={2}>ふつう</option>
                       <option value={3}>むずかしい</option>
