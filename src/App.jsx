@@ -1604,7 +1604,7 @@ useEffect(() => {
     ctx.fillStyle = COLORS.keyShadow;
     ctx.fillRect(x, y - 6, w, 6);
 
-    // 6. 【下レイヤー】白鍵を完全な長方形として境界線付きで描画
+    // 6. 【下レイヤー】白鍵を境界線付きで完全な長方形として描画
     ctx.save();
 
     for (let m = minMidi; m <= maxMidi; m++) {
@@ -1612,35 +1612,30 @@ useEffect(() => {
       if (!layout || !layout.isWhite) continue;
 
       if (effectLevel === "focus") {
-        // シンプルモード：白鍵本体
+        // シンプルモード：白鍵本体 + 境界線
         ctx.fillStyle = COLORS.whiteKey;
         ctx.fillRect(layout.x, layout.y, layout.w, layout.h);
 
-        // 完全な境界線（上から下まで、左右も含む）
+        // 各白鍵を細い線で完全に囲む
         ctx.strokeStyle = COLORS.keyBorder;
         ctx.lineWidth = 1;
+        ctx.lineJoin = "miter";
+        ctx.lineCap = "butt";
         ctx.strokeRect(layout.x + 0.5, layout.y + 0.5, layout.w - 1, layout.h - 1);
       } else {
-        // 高品質モード：まず基本の長方形を描画
-        ctx.fillStyle = COLORS.whiteKey;
-        ctx.beginPath();
-        drawRoundedRect(ctx, layout.x, layout.y, layout.w - 1, layout.h, 5);
-        ctx.fill();
+        // 高品質モード：質感 + 境界線
 
-        // 境界線
-        ctx.strokeStyle = COLORS.keyBorder;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        // その後、質感を追加（drawWhiteKeyの内容を適用）
+        // ベースグラデーション
         const g = ctx.createLinearGradient(layout.x, layout.y, layout.x, layout.y + layout.h);
         g.addColorStop(0, "#f7f9fb");
         g.addColorStop(0.5, "#eef2f7");
         g.addColorStop(1, "#e3e8ef");
         ctx.fillStyle = g;
+        ctx.beginPath();
+        drawRoundedRect(ctx, layout.x, layout.y, layout.w - 1, layout.h, 5);
         ctx.fill();
 
-        // 内側の影
+        // サイドシャドウ
         const side = ctx.createLinearGradient(layout.x, layout.y, layout.x + layout.w, layout.y);
         side.addColorStop(0.0, "rgba(0,0,0,0.10)");
         side.addColorStop(0.08, "rgba(0,0,0,0.00)");
@@ -1649,18 +1644,25 @@ useEffect(() => {
         ctx.fillStyle = side;
         ctx.fillRect(layout.x, layout.y, layout.w - 1, layout.h);
 
-        // 光沢
+        // トップグロス
         const gloss = ctx.createLinearGradient(layout.x, layout.y, layout.x, layout.y + layout.h * 0.28);
         gloss.addColorStop(0, "rgba(255,255,255,0.65)");
         gloss.addColorStop(1, "rgba(255,255,255,0)");
         ctx.fillStyle = gloss;
         ctx.fillRect(layout.x + 1, layout.y + 1, layout.w - 3, layout.h * 0.28);
+
+        // ★重要：外側境界線（各白鍵を完全に囲む）
+        ctx.strokeStyle = COLORS.keyBorder;
+        ctx.lineWidth = 1;
+        ctx.lineJoin = "miter";
+        ctx.lineCap = "butt";
+        ctx.strokeRect(layout.x + 0.5, layout.y + 0.5, layout.w - 1, layout.h - 1);
       }
     }
 
     ctx.restore();
 
-    // 7. 【上レイヤー】黒鍵を描画（白鍵の境界線を隠す）
+    // 7. 【上レイヤー】黒鍵を描画（白鍵の境界線を自然に隠す）
     for (let m = minMidi; m <= maxMidi; m++) {
       const layout = keyLayout.get(m);
       if (!layout || layout.isWhite) continue;
