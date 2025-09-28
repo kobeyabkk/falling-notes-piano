@@ -341,7 +341,7 @@ export default function App(){
   const [commentOverlayEnabled, setCommentOverlayEnabled] = useState(true);
   const [commentLocale, setCommentLocale] = useState("jp");
   const [commentShowOctave, setCommentShowOctave] = useState(false);
-  const [commentFontSize, setCommentFontSize] = useState(44);
+  const [commentFontSize, setCommentFontSize] = useState(28);
   const [commentLanes, setCommentLanes] = useState(2);
   const [commentTravelSec, setCommentTravelSec] = useState(8);
   const [commentEvents, setCommentEvents] = useState([]);
@@ -385,7 +385,7 @@ export default function App(){
   const commentSettings = useMemo(() => ({
     locale: commentLocale,
     showOctave: commentShowOctave,
-    fontSize: clamp(commentFontSize, 24, 72),
+    fontSize: clamp(commentFontSize, 16, 48),
     lanes: clamp(commentLanes, 1, 4),
     travelSec: clamp(commentTravelSec, 4, 10),
     preferSharps: true,
@@ -2196,13 +2196,13 @@ useEffect(() => {
                         <span className="opacity-80 whitespace-nowrap">文字サイズ</span>
                         <input
                           type="number"
-                          min={24}
-                          max={72}
+                          min={16}
+                          max={48}
                           className="w-full bg-slate-700 rounded-xl px-3 h-10"
                           value={commentFontSize}
                           onChange={e => {
                             const next = Number(e.target.value);
-                            setCommentFontSize(Number.isFinite(next) ? clamp(next, 24, 72) : 44);
+                            setCommentFontSize(Number.isFinite(next) ? clamp(next, 16, 48) : 28);
                           }}
                         />
                         <span className="text-xs opacity-60">px</span>
