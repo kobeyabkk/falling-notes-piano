@@ -17,7 +17,7 @@ function createLaneStates(count) {
 }
 
 const LANE_SPACING_RATIO = 0.6;
-const BACKDROP_ALPHA = 0.55;
+const BACKDROP_ALPHA = 0; // 背景帯を無効化（透明）
 
 const CommentOverlay = React.memo(function CommentOverlay({
   events = [],
@@ -36,14 +36,14 @@ const CommentOverlay = React.memo(function CommentOverlay({
   const {
     locale = "jp",
     showOctave = false,
-    fontSize: rawFontSize = 28,
+    fontSize: rawFontSize = 44,
     lanes: rawLanes = 2,
     travelSec: rawTravelSec = 8,
     preferSharps = true,
   } = settings || {};
 
   const lanes = clamp(Math.round(rawLanes || 1), 1, 4);
-  const fontSize = clamp(rawFontSize || 24, 16, 48);
+  const fontSize = clamp(rawFontSize || 24, 24, 72);
   const travelSec = clamp(rawTravelSec || 8, 4, 10);
 
   const overlayHeight = useMemo(() => {
@@ -111,11 +111,13 @@ const CommentOverlay = React.memo(function CommentOverlay({
         return;
       }
 
-      const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
-      bgGradient.addColorStop(0, `rgba(15,23,42,${BACKDROP_ALPHA})`);
-      bgGradient.addColorStop(1, `rgba(15,23,42,${BACKDROP_ALPHA * 0.5})`);
-      ctx.fillStyle = bgGradient;
-      ctx.fillRect(0, 0, width, height);
+      if (BACKDROP_ALPHA > 0) {
+        const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
+        bgGradient.addColorStop(0, `rgba(15,23,42,${BACKDROP_ALPHA})`);
+        bgGradient.addColorStop(1, `rgba(15,23,42,${BACKDROP_ALPHA * 0.5})`);
+        ctx.fillStyle = bgGradient;
+        ctx.fillRect(0, 0, width, height);
+      }
 
       const base = syncBaseRef.current;
       let effectiveSec = base.sec;
@@ -133,7 +135,7 @@ const CommentOverlay = React.memo(function CommentOverlay({
       ctx.textBaseline = "middle";
       ctx.fillStyle = textColor;
       ctx.shadowColor = shadowColor;
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = 12;
       ctx.shadowOffsetX = 0;
       ctx.shadowOffsetY = 0;
       ctx.font = `600 ${fontSize}px 'Noto Sans JP', 'Hiragino Sans', 'Noto Sans', system-ui, sans-serif`;
