@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Tone from "tone";
 import { Midi } from "@tonejs/midi";
 import { listSongs, saveSong, loadSongBytes, removeSong } from "./db";
+import CommentOverlay from "./overlay/CommentOverlay";
 
 /**
  * Falling Notes Piano – 視認性UP & 教育特化版（安定化＋エラーハンドリング強化）
@@ -13,6 +14,9 @@ const KEY_COUNT = 88;
 const A0_MIDI = 21;
 const C8_MIDI = A0_MIDI + KEY_COUNT - 1;
 const MIDDLE_C = 60;
+
+const MIN_VISIBLE_KEYS = 48;   // 最小表示鍵数（最大ズーム）
+const MAX_VISIBLE_KEYS = KEY_COUNT; // 既存の上限そのまま
 
 const NOTE_MIN_HEIGHT = 10;
 const SPEED = 140;     // px/sec
@@ -238,9 +242,47 @@ function nameDoReMi(midi){
 // range helpers
 const clampMidi = (m)=>clamp(m, A0_MIDI, C8_MIDI);
 function centerPresetRange(centerMidi, keyCount){
-  const half = Math.floor((keyCount-1)/2);
-  const min = clampMidi(centerMidi - half);
-  const max = clampMidi(min + keyCount - 1);
+  const span = clamp(Math.round(keyCount), MIN_VISIBLE_KEYS, MAX_VISIBLE_KEYS);
+  const clampedCenter = clampMidi(centerMidi);
+  const half = Math.floor((span - 1) / 2);
+  let min = clampedCenter - half;
+  let max = min + span - 1;
+
+  if (min < A0_MIDI) {
+    min = A0_MIDI;
+    max = min + span - 1;
+  }
+  if (max > C8_MIDI) {
+    max = C8_MIDI;
+    min = max - span + 1;
+  }
+
+  min = clampMidi(min);
+  max = clampMidi(max);
+
+  // 端で切れた場合でも span を維持
+  if (max - min + 1 < span) {
+    if (min === A0_MIDI) {
+      max = clampMidi(min + span - 1);
+    } else if (max === C8_MIDI) {
+      min = clampMidi(max - span + 1);
+    }
+  }
+
+  return { minMidi:min, maxMidi:max };
+}
+function normalizeVisibleRange(minMidi, maxMidi, desiredSpan = MIN_VISIBLE_KEYS){
+  let min = clampMidi(Math.min(minMidi, maxMidi));
+  let max = clampMidi(Math.max(minMidi, maxMidi));
+  const span = max - min + 1;
+  if(span < desiredSpan){
+    const center = Math.round((min + max) / 2);
+    return centerPresetRange(center, desiredSpan);
+  }
+  if(span > MAX_VISIBLE_KEYS){
+    const center = Math.round((min + max) / 2);
+    return centerPresetRange(center, MAX_VISIBLE_KEYS);
+  }
   return { minMidi:min, maxMidi:max };
 }
 function analyzeNoteRangeAuto(notes){
@@ -248,12 +290,7 @@ function analyzeNoteRangeAuto(notes){
   let min=Infinity, max=-Infinity;
   for(const n of notes){ if(n.midi<min) min=n.midi; if(n.midi>max) max=n.midi; }
   min = clampMidi(min-3); max = clampMidi(max+3);
-  const minWidth = 24;
-  if(max-min+1 < minWidth){
-    const center = (min+max)/2|0;
-    return centerPresetRange(center, minWidth);
-  }
-  return { minMidi:min, maxMidi:max };
+  return normalizeVisibleRange(min, max);
 }
 
 // ---------- particles / ripples / aura ----------
@@ -301,6 +338,13 @@ export default function App(){
   const [effectLevel, setEffectLevel] = useState("standard"); // focus | standard | fun
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [labelMode, setLabelMode] = useState("none"); // none | AG | DoReMi
+  const [commentOverlayEnabled, setCommentOverlayEnabled] = useState(true);
+  const [commentLocale, setCommentLocale] = useState("jp");
+  const [commentShowOctave, setCommentShowOctave] = useState(false);
+  const [commentFontSize, setCommentFontSize] = useState(28);
+  const [commentLanes, setCommentLanes] = useState(2);
+  const [commentTravelSec, setCommentTravelSec] = useState(8);
+  const [commentEvents, setCommentEvents] = useState([]);
 
   const [rangePreset, setRangePreset] = useState("auto");
   const [viewMinMidi, setViewMinMidi] = useState(A0_MIDI);
@@ -312,6 +356,7 @@ export default function App(){
   const [genTempo, setGenTempo] = useState(90);          // bpm
   const [genBars, setGenBars] = useState(4);             // 小節数
   const [genDifficulty, setGenDifficulty] = useState(0); // 0..3
+  const [genType, setGenType] = useState("random");      // random | twinkle | butterfly
 
   // library UI
   const [libOpen, setLibOpen] = useState(false);
@@ -336,6 +381,15 @@ export default function App(){
   );
 
   const isDevEnvironment = import.meta.env?.DEV ?? false;
+
+  const commentSettings = useMemo(() => ({
+    locale: commentLocale,
+    showOctave: commentShowOctave,
+    fontSize: clamp(commentFontSize, 16, 48),
+    lanes: clamp(commentLanes, 1, 4),
+    travelSec: clamp(commentTravelSec, 4, 10),
+    preferSharps: true,
+  }), [commentLocale, commentShowOctave, commentFontSize, commentLanes, commentTravelSec]);
 
   // 可視窓
   const noteStartsRef = useRef([]);
@@ -793,6 +847,7 @@ useEffect(() => {
         });
       });
       flat.sort((a,b)=>a.start-b.start);
+      setCommentEvents(flat.map(n => ({ startSec: n.start, midi: n.midi })));
       const merged = mergeConsecutiveNotes(flat);
 
       const dur = merged.reduce((mx,n)=>Math.max(mx,n.end),0);
@@ -820,6 +875,19 @@ useEffect(() => {
     return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
   }
 
+  const pdPatterns = [
+    {
+      name: "きらきら星",
+      notes: [60, 60, 67, 67, 65, 65, 67, 0, 65, 65, 64, 64, 62, 62, 60, 0],
+      durations: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5],
+    },
+    {
+      name: "ちょうちょう",
+      notes: [60, 62, 64, 65, 64, 62, 60, 0, 62, 64, 62, 64, 62, 0, 60, 0],
+      durations: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 1, 0.5],
+    },
+  ];
+
   const KEY_TO_SEMITONE = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 };
   function buildScaleIntervals(scale){
     return scale==="minor" ? [0,2,3,5,7,8,10,12] : [0,2,4,5,7,9,11,12]; // 自然的短音階/長音階
@@ -838,42 +906,60 @@ useEffect(() => {
       midi.header.setTempo(tempo);
 
       if(difficulty === 0){
-        const beginnerPatterns = [
-          [60, 60, 67, 67, 65, 65, 67, 0, 65, 65, 64, 64, 62, 62, 60, 0],
-          [60, 62, 64, 65, 67, 0, 67, 65, 64, 62, 60, 0, 60, 0, 60, 0],
-          [60, 0, 64, 0, 67, 0, 60, 0, 60, 0, 64, 0, 67, 0, 60, 0],
-        ];
-        const selectedPattern = beginnerPatterns[Math.floor(Math.random() * beginnerPatterns.length)];
+        const patternSelection =
+          genType === "twinkle"
+            ? pdPatterns.find(p => p.name === "きらきら星")
+            : genType === "butterfly"
+            ? pdPatterns.find(p => p.name === "ちょうちょう")
+            : randomChoice(pdPatterns);
+
+        const selectedPattern = patternSelection || pdPatterns[0];
         const secondsPerBeat = 60 / tempo;
+        const beatsPerBar = 4;
+        const targetBeats = beatsPerBar * 4; // 4 bars fixed for beginner mode
 
         const rightTrack = midi.addTrack();
-        rightTrack.name = "Beginner Right";
-        selectedPattern.forEach((pitch, idx) => {
-          if(pitch !== 0){
+        rightTrack.name = `${selectedPattern.name} Melody`;
+
+        let beatCursor = 0;
+        let idx = 0;
+        const notesLength = selectedPattern.notes.length;
+        while (beatCursor < targetBeats - 1e-6 && notesLength > 0){
+          const patIndex = idx % notesLength;
+          const pitch = selectedPattern.notes[patIndex];
+          const rawDuration = selectedPattern.durations?.[patIndex] ?? 0.5;
+          const safeDuration = Math.max(rawDuration, 0.25);
+          const remainingBeats = targetBeats - beatCursor;
+          const beatDuration = Math.min(safeDuration, remainingBeats);
+
+          if(pitch !== 0 && beatDuration > 1e-6){
             rightTrack.addNote({
               midi: pitch,
-              time: idx * secondsPerBeat,
-              duration: secondsPerBeat,
+              time: beatCursor * secondsPerBeat,
+              duration: beatDuration * secondsPerBeat,
               velocity: 0.8,
             });
           }
-        });
+
+          beatCursor += beatDuration;
+          idx += 1;
+        }
 
         const leftTrack = midi.addTrack();
-        leftTrack.name = "Beginner Left";
-        const bassNotes = [48, 53, 55, 48];
+        leftTrack.name = `${selectedPattern.name} Bass`;
+        const bassNotes = [48, 53, 55, 48]; // C3 - F3 - G3 - C3
         bassNotes.forEach((bassMidi, bar) => {
           leftTrack.addNote({
             midi: bassMidi,
-            time: bar * 4 * secondsPerBeat,
-            duration: 4 * secondsPerBeat,
+            time: bar * beatsPerBar * secondsPerBeat,
+            duration: beatsPerBar * secondsPerBeat,
             velocity: 0.7,
           });
         });
 
         const bytes = midi.toArray();
         await loadMidiFromBytes(toArrayBufferFromU8(bytes));
-        setName("C_beginner_4bars.mid");
+        setName(`${selectedPattern.name}_beginner.mid`);
         return;
       }
 
@@ -961,14 +1047,22 @@ useEffect(() => {
   }
 
   function applyRangePreset(preset, src){
+    let effective = preset;
+    if(effective === "24") effective = "48";
+
     let range;
-    if(preset==="auto") range = analyzeNoteRangeAuto(src);
-    else if(preset==="24") range = centerPresetRange(MIDDLE_C, 24);
-    else if(preset==="48") range = centerPresetRange(MIDDLE_C, 48);
-    else if(preset==="61") range = centerPresetRange(MIDDLE_C, 61);
+    if(effective === "auto") range = analyzeNoteRangeAuto(src);
+    else if(effective === "48") range = centerPresetRange(MIDDLE_C, 48);
+    else if(effective === "61") range = centerPresetRange(MIDDLE_C, 61);
+    else if(effective === "76") range = centerPresetRange(MIDDLE_C, 76);
+    else if(effective === "88") range = centerPresetRange(MIDDLE_C, 88);
     else range = { minMidi:A0_MIDI, maxMidi:C8_MIDI };
-    setViewMinMidi(range.minMidi);
-    setViewMaxMidi(range.maxMidi);
+
+    const normalized = normalizeVisibleRange(range.minMidi, range.maxMidi);
+    setViewMinMidi(normalized.minMidi);
+    setViewMaxMidi(normalized.maxMidi);
+
+    if(effective !== preset) setRangePreset(effective);
   }
   useEffect(()=>{ applyRangePreset(rangePreset, notes); },[rangePreset]);
 
@@ -1946,6 +2040,20 @@ useEffect(() => {
                     </select>
                   </div>
 
+                  <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2 sm:px-4">
+                    <span className="opacity-80">パターン</span>
+                    <select
+                      className="bg-slate-700 rounded-xl px-3 h-11 disabled:opacity-50 disabled:cursor-not-allowed"
+                      value={genType}
+                      onChange={e => setGenType(e.target.value)}
+                      disabled={genDifficulty !== 0}
+                    >
+                      <option value="random">🎲 ランダム</option>
+                      <option value="twinkle">きらきら星</option>
+                      <option value="butterfly">ちょうちょう</option>
+                    </select>
+                  </div>
+
 
                   <button
                     className="w-full sm:w-auto min-h-[44px] px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition"
@@ -2042,9 +2150,9 @@ useEffect(() => {
                       onChange={e => setRangePreset(e.target.value)}
                     >
                       <option value="auto">Auto（楽曲解析）</option>
-                      <option value="24">24鍵（幼児）</option>
-                      <option value="48">48鍵（小学生）</option>
+                      <option value="48">48鍵（入門）</option>
                       <option value="61">61鍵（標準）</option>
+                      <option value="76">76鍵（拡張）</option>
                       <option value="88">88鍵（フル）</option>
                     </select>
                   </div>
@@ -2061,6 +2169,87 @@ useEffect(() => {
                       <option value="DoReMi">ドレミ</option>
                     </select>
                   </div>
+
+                  <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={commentOverlayEnabled}
+                      onChange={e => setCommentOverlayEnabled(e.target.checked)}
+                    />
+                    <span className="opacity-80">ドレミ表示</span>
+                    <span className="text-xs text-slate-400">（上部コメント）</span>
+                  </label>
+                  {commentOverlayEnabled && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <span className="opacity-80 whitespace-nowrap">表記</span>
+                        <select
+                          className="w-full bg-slate-700 rounded-xl px-3 h-10"
+                          value={commentLocale}
+                          onChange={e => setCommentLocale(e.target.value === "en" ? "en" : "jp")}
+                        >
+                          <option value="jp">ドレミ（日本語）</option>
+                          <option value="en">CDE（英字）</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <span className="opacity-80 whitespace-nowrap">文字サイズ</span>
+                        <input
+                          type="number"
+                          min={16}
+                          max={48}
+                          className="w-full bg-slate-700 rounded-xl px-3 h-10"
+                          value={commentFontSize}
+                          onChange={e => {
+                            const next = Number(e.target.value);
+                            setCommentFontSize(Number.isFinite(next) ? clamp(next, 16, 48) : 28);
+                          }}
+                        />
+                        <span className="text-xs opacity-60">px</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <span className="opacity-80 whitespace-nowrap">レーン</span>
+                        <select
+                          className="w-full bg-slate-700 rounded-xl px-3 h-10"
+                          value={commentLanes}
+                          onChange={e => {
+                            const next = parseInt(e.target.value, 10);
+                            setCommentLanes(Number.isFinite(next) ? clamp(next, 1, 4) : 2);
+                          }}
+                        >
+                          {[1, 2, 3, 4].map(v => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <span className="opacity-80 whitespace-nowrap">表示速度</span>
+                        <input
+                          type="number"
+                          min={4}
+                          max={10}
+                          step={0.5}
+                          className="w-full bg-slate-700 rounded-xl px-3 h-10"
+                          value={commentTravelSec}
+                          onChange={e => {
+                            const next = Number(e.target.value);
+                            setCommentTravelSec(Number.isFinite(next) ? clamp(next, 4, 10) : 8);
+                          }}
+                        />
+                        <span className="text-xs opacity-60">秒</span>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={commentShowOctave}
+                          onChange={e => setCommentShowOctave(e.target.checked)}
+                        />
+                        <span className="opacity-80">オクターブを表示</span>
+                      </label>
+                    </div>
+                  )}
 
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="opacity-80 font-medium">Effect:</span>
@@ -2110,7 +2299,18 @@ useEffect(() => {
             </div>
           </details>
 
-          <div style={{ height: 520, border: "1px solid #334155", borderRadius: 12, overflow: "hidden" }}>
+          <div
+            style={{ height: 520, border: "1px solid #334155", borderRadius: 12, overflow: "hidden", position: "relative" }}
+          >
+            {commentOverlayEnabled && commentEvents.length > 0 && (
+              <CommentOverlay
+                events={commentEvents}
+                currentSec={playhead}
+                playing={isPlaying}
+                rate={rate}
+                settings={commentSettings}
+              />
+            )}
             <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
           </div>
 
