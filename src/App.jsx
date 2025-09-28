@@ -310,8 +310,8 @@ export default function App(){
   const [genKey, setGenKey] = useState("C");             // C,D,E,F,G,A,B
   const [genScale, setGenScale] = useState("major");     // major | minor
   const [genTempo, setGenTempo] = useState(90);          // bpm
-  const [genBars, setGenBars] = useState(8);             // 小節数
-  const [genDifficulty, setGenDifficulty] = useState(2); // 1..3
+  const [genBars, setGenBars] = useState(4);             // 小節数
+  const [genDifficulty, setGenDifficulty] = useState(0); // 0..3
 
   // library UI
   const [libOpen, setLibOpen] = useState(false);
@@ -831,13 +831,63 @@ useEffect(() => {
   async function generateAndLoad() {
     try {
       const tempo = clamp(genTempo, 50, 160);
-      const bars = clamp(genBars, 2, 32);
-      const difficulty = clamp(genDifficulty, 1, 3);
+      const requestedBars = clamp(genBars, 2, 32);
+      const difficulty = clamp(genDifficulty, 0, 3);
 
       const midi = new Midi();
       midi.header.setTempo(tempo);
 
+      if(difficulty === 0){
+        const beatsToSeconds = (beat) => (beat * 60) / tempo;
+        const rightTrack = midi.addTrack();
+        rightTrack.name = "Beginner Right";
+        const leftTrack = midi.addTrack();
+        leftTrack.name = "Beginner Left";
+
+        const whitePitches = [60, 62, 64, 65, 67];
+        let idx = 0;
+        for(let beat = 0; beat < 16; beat++){
+          if(beat === 15){
+            idx = 0; // 最終音はC4で着地
+          }else{
+            const moves = [idx];
+            if(idx > 0) moves.push(idx - 1);
+            if(idx < whitePitches.length - 1) moves.push(idx + 1);
+            const weighted = [];
+            for(const m of moves){
+              weighted.push(m);
+              if(m !== idx) weighted.push(m); // 隣接音を優先
+            }
+            idx = randomChoice(weighted);
+          }
+          const midiNote = whitePitches[idx];
+          rightTrack.addNote({
+            midi: midiNote,
+            time: beatsToSeconds(beat),
+            duration: beatsToSeconds(1),
+            velocity: 0.85,
+          });
+        }
+
+        const leftPattern = [48, 53, 55, 48];
+        leftPattern.forEach((midiNote, barIdx) => {
+          leftTrack.addNote({
+            midi: midiNote,
+            time: beatsToSeconds(barIdx * 4),
+            duration: beatsToSeconds(4),
+            velocity: 0.7,
+          });
+        });
+
+        const bytes = midi.toArray();
+        await loadMidiFromBytes(toArrayBufferFromU8(bytes));
+        setName("C_beginner_4bars.mid");
+        return;
+      }
+
       const tr = midi.addTrack();
+      const bars = requestedBars;
+      const effDifficulty = clamp(difficulty, 1, 3);
       const rootSemitone = KEY_TO_SEMITONE[genKey] ?? 0;
       const scale = buildScaleIntervals(genScale);
       const rootOct = 60; // C4を基準、選んだキーにシフト
@@ -845,8 +895,8 @@ useEffect(() => {
       // リズム：難易度で密度を切替
       // diff=1: 1/2音符中心, diff=2: 1/4中心, diff=3: 1/8混在
       const rhythmPool =
-        difficulty===1 ? [1.0, 0.5, 0.5, 1.0] :
-        difficulty===2 ? [0.5, 0.5, 0.25, 0.25, 1.0] :
+        effDifficulty===1 ? [1.0, 0.5, 0.5, 1.0] :
+        effDifficulty===2 ? [0.5, 0.5, 0.25, 0.25, 1.0] :
                          [0.25, 0.25, 0.5, 0.25, 0.125, 0.375];
 
       // メロディ方針：スケール内を小さな歩幅でランダムウォーク（跳躍抑制）、小節末は着地
@@ -871,14 +921,14 @@ useEffect(() => {
           degreeIdx = clamp(degreeIdx + step, 0, scale.length-1);
           currentMidi = clampToRange(rootOct + rootSemitone + scale[degreeIdx]);
           // たまにオクターブ上げ下げ（難易度3のみ）
-          if(difficulty===3 && Math.random()<0.15){
+          if(effDifficulty===3 && Math.random()<0.15){
             const up = Math.random()<0.5 ? -12 : 12;
             currentMidi = clampToRange(currentMidi + up);
           }
         }
 
         // 休符：難易度1で少なめ、3でやや多め
-        const restProb = difficulty===1 ? 0.05 : difficulty===2 ? 0.1 : 0.15;
+        const restProb = effDifficulty===1 ? 0.05 : effDifficulty===2 ? 0.1 : 0.15;
         const isRest = Math.random() < restProb;
 
         if(!isRest){
@@ -1885,7 +1935,7 @@ useEffect(() => {
                       max={32}
                       className="w-full sm:w-24 bg-slate-700 rounded-xl px-3 h-11"
                       value={genBars}
-                      onChange={e => setGenBars(parseInt(e.target.value || "8"))}
+                      onChange={e => setGenBars(parseInt(e.target.value || "4"))}
                     />
                   </div>
 
@@ -1897,6 +1947,7 @@ useEffect(() => {
                       value={genDifficulty}
                       onChange={e => setGenDifficulty(parseInt(e.target.value))}
                     >
+                      <option value={0}>🎯 初心者（4小節・白鍵のみ）</option>
                       <option value={1}>やさしい</option>
                       <option value={2}>ふつう</option>
                       <option value={3}>むずかしい</option>
