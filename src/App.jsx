@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import * as Tone from "tone";
 import { Midi } from "@tonejs/midi";
 import { listSongs, saveSong, loadSongBytes, removeSong } from "./db";
+import CommentOverlay from "./overlay/CommentOverlay";
 
 /**
  * Falling Notes Piano – 視認性UP & 教育特化版（安定化＋エラーハンドリング強化）
@@ -337,6 +338,13 @@ export default function App(){
   const [effectLevel, setEffectLevel] = useState("standard"); // focus | standard | fun
   const [loopEnabled, setLoopEnabled] = useState(false);
   const [labelMode, setLabelMode] = useState("none"); // none | AG | DoReMi
+  const [commentOverlayEnabled, setCommentOverlayEnabled] = useState(true);
+  const [commentLocale, setCommentLocale] = useState("jp");
+  const [commentShowOctave, setCommentShowOctave] = useState(false);
+  const [commentFontSize, setCommentFontSize] = useState(28);
+  const [commentLanes, setCommentLanes] = useState(2);
+  const [commentTravelSec, setCommentTravelSec] = useState(8);
+  const [commentEvents, setCommentEvents] = useState([]);
 
   const [rangePreset, setRangePreset] = useState("auto");
   const [viewMinMidi, setViewMinMidi] = useState(A0_MIDI);
@@ -373,6 +381,15 @@ export default function App(){
   );
 
   const isDevEnvironment = import.meta.env?.DEV ?? false;
+
+  const commentSettings = useMemo(() => ({
+    locale: commentLocale,
+    showOctave: commentShowOctave,
+    fontSize: clamp(commentFontSize, 16, 48),
+    lanes: clamp(commentLanes, 1, 4),
+    travelSec: clamp(commentTravelSec, 4, 10),
+    preferSharps: true,
+  }), [commentLocale, commentShowOctave, commentFontSize, commentLanes, commentTravelSec]);
 
   // 可視窓
   const noteStartsRef = useRef([]);
@@ -830,6 +847,7 @@ useEffect(() => {
         });
       });
       flat.sort((a,b)=>a.start-b.start);
+      setCommentEvents(flat.map(n => ({ startSec: n.start, midi: n.midi })));
       const merged = mergeConsecutiveNotes(flat);
 
       const dur = merged.reduce((mx,n)=>Math.max(mx,n.end),0);
@@ -2152,6 +2170,87 @@ useEffect(() => {
                     </select>
                   </div>
 
+                  <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={commentOverlayEnabled}
+                      onChange={e => setCommentOverlayEnabled(e.target.checked)}
+                    />
+                    <span className="opacity-80">ドレミ表示</span>
+                    <span className="text-xs text-slate-400">（上部コメント）</span>
+                  </label>
+                  {commentOverlayEnabled && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <span className="opacity-80 whitespace-nowrap">表記</span>
+                        <select
+                          className="w-full bg-slate-700 rounded-xl px-3 h-10"
+                          value={commentLocale}
+                          onChange={e => setCommentLocale(e.target.value === "en" ? "en" : "jp")}
+                        >
+                          <option value="jp">ドレミ（日本語）</option>
+                          <option value="en">CDE（英字）</option>
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <span className="opacity-80 whitespace-nowrap">文字サイズ</span>
+                        <input
+                          type="number"
+                          min={16}
+                          max={48}
+                          className="w-full bg-slate-700 rounded-xl px-3 h-10"
+                          value={commentFontSize}
+                          onChange={e => {
+                            const next = Number(e.target.value);
+                            setCommentFontSize(Number.isFinite(next) ? clamp(next, 16, 48) : 28);
+                          }}
+                        />
+                        <span className="text-xs opacity-60">px</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <span className="opacity-80 whitespace-nowrap">レーン</span>
+                        <select
+                          className="w-full bg-slate-700 rounded-xl px-3 h-10"
+                          value={commentLanes}
+                          onChange={e => {
+                            const next = parseInt(e.target.value, 10);
+                            setCommentLanes(Number.isFinite(next) ? clamp(next, 1, 4) : 2);
+                          }}
+                        >
+                          {[1, 2, 3, 4].map(v => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <span className="opacity-80 whitespace-nowrap">表示速度</span>
+                        <input
+                          type="number"
+                          min={4}
+                          max={10}
+                          step={0.5}
+                          className="w-full bg-slate-700 rounded-xl px-3 h-10"
+                          value={commentTravelSec}
+                          onChange={e => {
+                            const next = Number(e.target.value);
+                            setCommentTravelSec(Number.isFinite(next) ? clamp(next, 4, 10) : 8);
+                          }}
+                        />
+                        <span className="text-xs opacity-60">秒</span>
+                      </div>
+                      <label className="flex items-center gap-2 text-sm bg-slate-900/20 rounded-2xl px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={commentShowOctave}
+                          onChange={e => setCommentShowOctave(e.target.checked)}
+                        />
+                        <span className="opacity-80">オクターブを表示</span>
+                      </label>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center gap-3">
                     <span className="opacity-80 font-medium">Effect:</span>
                     <label className="flex items-center gap-1 cursor-pointer">
@@ -2200,7 +2299,18 @@ useEffect(() => {
             </div>
           </details>
 
-          <div style={{ height: 520, border: "1px solid #334155", borderRadius: 12, overflow: "hidden" }}>
+          <div
+            style={{ height: 520, border: "1px solid #334155", borderRadius: 12, overflow: "hidden", position: "relative" }}
+          >
+            {commentOverlayEnabled && commentEvents.length > 0 && (
+              <CommentOverlay
+                events={commentEvents}
+                currentSec={playhead}
+                playing={isPlaying}
+                rate={rate}
+                settings={commentSettings}
+              />
+            )}
             <canvas ref={canvasRef} style={{ width: "100%", height: "100%", display: "block" }} />
           </div>
 
