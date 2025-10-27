@@ -358,6 +358,7 @@ function spawnRipple(store, {x,y}, level){
 
 export default function App(){
   const canvasRef = useRef(null);
+  const canvasStageRef = useRef(null); // Canvas測定用のステージコンテナ
 
   // data
   const [notes, setNotes] = useState([]);
@@ -670,8 +671,8 @@ useEffect(() => {
     setUpdateToast(null);
   }, []);
 
-  // size cache
-  const canvasSizeRef = useRef({ W:0, H:0 });
+  // size cache (DPR追加)
+  const canvasSizeRef = useRef({ W:0, H:0, dpr:1 });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -834,62 +835,76 @@ useEffect(() => {
     prevTRef.current = playheadRef.current;
   },[rate]);
 
-  // resize
-  useEffect(()=>{
-    const handle=()=>onResize();
-    window.addEventListener("resize", handle);
+  // ResizeObserverによる確実な監視
+  useEffect(() => {
+    const stage = canvasStageRef.current;
+    if (!stage) return;
+
+    const observer = new ResizeObserver(() => {
+      syncCanvasSize();
+    });
+
+    observer.observe(stage);
     
-    // タブが表示された時にリサイズ（タブ切り替え対応）
-    const handleVisibility = () => {
-      if (!document.hidden) {
-        setTimeout(() => onResize(), 50);
-      }
+    // 初回実行（マウント直後）
+    syncCanvasSize();
+
+    return () => {
+      observer.disconnect();
     };
-    document.addEventListener("visibilitychange", handleVisibility);
-    
-    // 初回リサイズを遅延実行
-    const timeout = setTimeout(() => {
-      onResize();
-    }, 100);
-    
-    return ()=>{
-      window.removeEventListener("resize", handle);
-      document.removeEventListener("visibilitychange", handleVisibility);
-      clearTimeout(timeout);
-    };
-  },[notes, viewMinMidi, viewMaxMidi, requestFrameBoost]);
+  }, [notes]);
 
   useEffect(()=>()=>cancelRAF(),[]);
 
-  function onResize(){
-    const c = canvasRef.current; if(!c) return;
-    const dpr = window.devicePixelRatio||1;
-    const rect = c.getBoundingClientRect();
+  function syncCanvasSize(){
+    const stage = canvasStageRef.current;
+    const c = canvasRef.current;
+    if (!stage || !c) return;
+
+    const rect = stage.getBoundingClientRect();
     
-    // サイズが0の場合は処理をスキップ
-    if(rect.width === 0 || rect.height === 0) {
+    // サイズが取得できない場合は処理を停止
+    if (rect.width <= 0 || rect.height <= 0) {
+      console.warn('[Canvas Resize] Invalid size:', rect);
       return;
     }
-    
-    // 前回と同じサイズなら処理をスキップ（最適化）
-    const prevSize = canvasSizeRef.current;
-    if(prevSize && Math.abs(prevSize.W - rect.width) < 1 && Math.abs(prevSize.H - rect.height) < 1) {
+
+    // DPRを安全な範囲に制限（メモリ使用量とパフォーマンスのバランス）
+    const dprRaw = window.devicePixelRatio || 1;
+    const dpr = Math.min(Math.max(dprRaw, 1), 2.5);
+
+    const cssW = Math.round(rect.width);
+    const cssH = Math.round(rect.height);
+    const pixelW = Math.round(cssW * dpr);
+    const pixelH = Math.round(cssH * dpr);
+
+    // 変更がない場合は早期return
+    const prev = canvasSizeRef.current;
+    if (prev && prev.W === cssW && prev.H === cssH && prev.dpr === dpr) {
       return;
     }
-    
-    // デバッグログ: 画面サイズとキャンバスサイズを記録
+
     console.log('[Canvas Resize]', {
       viewport: { w: window.innerWidth, h: window.innerHeight },
-      cssSize: { w: rect.width, h: rect.height },
-      canvasSize: { w: Math.floor(rect.width*dpr), h: Math.floor(rect.height*dpr) },
+      cssSize: { w: cssW, h: cssH },
+      canvasBuffer: { w: pixelW, h: pixelH },
       dpr: dpr
     });
-    
-    c.width = Math.floor(rect.width*dpr);
-    c.height = Math.floor(rect.height*dpr);
-    c.getContext("2d").setTransform(dpr,0,0,dpr,0,0);
-    canvasSizeRef.current = { W:rect.width, H:rect.height };
-    recomputeVisualEnd(rect.height, notes);
+
+    // Canvas解像度の設定
+    c.width = pixelW;
+    c.height = pixelH;
+
+    // 描画コンテキストの安全なリセット→スケール
+    const ctx = c.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);  // 完全リセット
+    ctx.scale(dpr, dpr);                  // DPRスケール適用
+
+    // サイズ情報の保存
+    canvasSizeRef.current = { W: cssW, H: cssH, dpr: dpr };
+
+    // 既存処理の呼び出し
+    recomputeVisualEnd(cssH, notes);
     renderFrame(playheadRef.current);
     requestFrameBoost();
   }
@@ -2119,14 +2134,16 @@ useEffect(() => {
 
 
   return (
-    <div className="h-screen bg-slate-900 text-slate-100 flex flex-col overflow-hidden">
+    <div className="grid h-screen grid-rows-[50px_1fr] bg-slate-900 text-slate-100 overflow-hidden">
       {/* フォーカスモード: キャンバスのみ表示 */}
       {focusMode ? (
-        <div className="relative flex-1">
-          <canvas ref={canvasRef} className="w-full h-full block" />
+        <div className="col-span-full row-span-full relative">
+          <div ref={canvasStageRef} className="absolute inset-0">
+            <canvas ref={canvasRef} className="w-full h-full block" />
+          </div>
           {/* フォーカスモード解除ボタン */}
           <button
-            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center bg-slate-800/80 hover:bg-slate-700/80 rounded-full backdrop-blur transition"
+            className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center bg-slate-800/80 hover:bg-slate-700/80 rounded-full backdrop-blur transition z-10"
             onClick={() => setFocusMode(false)}
             title="フォーカスモード解除"
           >
@@ -2136,7 +2153,7 @@ useEffect(() => {
       ) : (
         <>
           {/* コンパクトヘッダー（50px） */}
-          <header className="h-[50px] bg-slate-900/95 backdrop-blur border-b border-slate-800 flex items-center px-3 gap-2 shrink-0 relative z-50">
+          <header className="row-start-1 h-[50px] bg-slate-900/95 backdrop-blur border-b border-slate-800 flex items-center px-3 gap-2 shrink-0 relative z-50">
             {/* ファイル読み込みボタン */}
             <label className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition cursor-pointer" title="MIDI読み込み">
               <span className="text-lg">📁</span>
@@ -2265,14 +2282,14 @@ useEffect(() => {
           </header>
 
           {/* メインコンテンツエリア */}
-          <main className="flex flex-col" style={{ height: 'calc(100vh - 50px)' }}>
-            {/* キャンバスエリア */}
-            <div className="relative" style={{ flex: '1 1 0', minHeight: 0 }}>
-              <canvas ref={canvasRef} className="w-full h-full block" />
+          <main className="row-start-2 relative min-h-0 min-w-0 flex flex-col">
+            {/* Canvas測定用のステージコンテナ */}
+            <div ref={canvasStageRef} className="flex-1 min-h-0 min-w-0 relative">
+              <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
             </div>
 
             {/* シークバー & A-Bコントロールエリア */}
-            <div className="bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 py-2 space-y-2" style={{ flexShrink: 0 }}>
+            <div className="bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 py-2 space-y-2 shrink-0">
               {/* 進捗表示 */}
               <div className="flex items-center justify-between text-xs text-slate-300">
                 <span className="font-mono">{fmt(playhead)} / {fmt(totalDuration)}</span>
