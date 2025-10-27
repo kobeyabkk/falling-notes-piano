@@ -849,13 +849,6 @@ useEffect(() => {
       clearTimeout(timeout);
     };
   },[]); // 空の依存配列 - マウント時のみ
-  
-  // notes変更時（ファイル読み込み時）にリサイズ
-  useEffect(()=>{
-    if(notes.length > 0){
-      setTimeout(() => onResize(), 50);
-    }
-  },[notes.length]); // notes.lengthのみ監視
 
   useEffect(()=>()=>cancelRAF(),[]);
 
