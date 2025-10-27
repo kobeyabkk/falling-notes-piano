@@ -19,7 +19,7 @@ const MAX_VISIBLE_KEYS = KEY_COUNT; // 既存の上限そのまま
 
 const NOTE_MIN_HEIGHT = 10;
 const SPEED = 140;     // px/sec
-const KB_HEIGHT = 140; // keyboard height (px)
+const KB_HEIGHT = 100; // keyboard height (px) - reduced for better visibility
 const VISUAL_MAX_SEC = 2.5; // 表示上の最大長（音は実長で鳴らす）
 const STOP_TAIL = 1.0; // 自動停止の安全マージン（秒）
 
@@ -834,12 +834,28 @@ useEffect(() => {
     prevTRef.current = playheadRef.current;
   },[rate]);
 
-  // resize
+  // resize - マウント時のみセットアップ、初回リサイズ実行
   useEffect(()=>{
     const handle=()=>onResize();
     window.addEventListener("resize", handle);
-    return ()=>window.removeEventListener("resize", handle);
-  },[notes, viewMinMidi, viewMaxMidi, requestFrameBoost]);
+    
+    // 初回リサイズ（レイアウト確定後）
+    const timeout = setTimeout(() => {
+      onResize();
+    }, 100);
+    
+    return ()=>{
+      window.removeEventListener("resize", handle);
+      clearTimeout(timeout);
+    };
+  },[]); // 空の依存配列 - マウント時のみ
+  
+  // notes変更時（ファイル読み込み時）にリサイズ
+  useEffect(()=>{
+    if(notes.length > 0){
+      setTimeout(() => onResize(), 50);
+    }
+  },[notes.length]); // notes.lengthのみ監視
 
   useEffect(()=>()=>cancelRAF(),[]);
 
