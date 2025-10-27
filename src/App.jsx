@@ -2106,122 +2106,216 @@ useEffect(() => {
         </div>
       ) : (
         <>
-          {/* コンパクトヘッダー（50px） */}
-          <header className="h-[50px] bg-slate-900/95 backdrop-blur border-b border-slate-800 flex items-center px-3 gap-2 shrink-0">
-            {/* メニューボタン */}
-            <button
-              className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
-              onClick={() => setMenuOpen(true)}
-              title="メニュー"
-            >
-              <span className="text-xl">≡</span>
-            </button>
+          {/* 2行ヘッダー */}
+          <header className="bg-slate-900/95 backdrop-blur border-b border-slate-800 shrink-0">
+            {/* 1行目: ファイル読み込み・シークバー・再生コントロール */}
+            <div className="h-[50px] flex items-center px-3 gap-2">
+              {/* メニューボタン */}
+              <button
+                className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
+                onClick={() => setMenuOpen(true)}
+                title="メニュー"
+              >
+                <span className="text-xl">≡</span>
+              </button>
 
-            {/* 曲名表示 */}
-            <div className="flex-1 min-w-0 text-sm font-medium truncate px-2">
-              {name || "No file loaded"}
+              {/* ファイル読み込みボタン */}
+              <label className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition cursor-pointer" title="MIDI読み込み">
+                <span className="text-lg">📁</span>
+                <input
+                  type="file"
+                  accept=".mid,.midi"
+                  className="hidden"
+                  onChange={onFile}
+                />
+              </label>
+
+              {/* シークバー - 進捗表示付き */}
+              <div className="flex-1 flex items-center gap-2 min-w-0">
+                <span className="text-xs text-slate-400 font-mono whitespace-nowrap">{fmt(playhead)}</span>
+                <div className="flex-1 relative">
+                  <input
+                    type="range"
+                    min={0}
+                    max={totalDuration || 1}
+                    step={0.01}
+                    value={playhead}
+                    onChange={handleSeekChange}
+                    onMouseDown={handleSeekStart}
+                    onMouseUp={handleSeekEnd}
+                    onTouchStart={handleSeekStart}
+                    onTouchEnd={handleSeekEnd}
+                    disabled={!notes.length}
+                    className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      background: notes.length ? `linear-gradient(to right, #10b981 0%, #10b981 ${progressPercent}%, #334155 ${progressPercent}%, #334155 100%)` : '#334155'
+                    }}
+                  />
+                  {/* A-Bリピートマーカー */}
+                  {abRepeatA != null && totalDuration > 0 && (
+                    <div
+                      className="absolute top-0 h-2 w-1 bg-blue-400 pointer-events-none"
+                      style={{ left: `${(abRepeatA / totalDuration) * 100}%` }}
+                    />
+                  )}
+                  {abRepeatB != null && totalDuration > 0 && (
+                    <div
+                      className="absolute top-0 h-2 w-1 bg-red-400 pointer-events-none"
+                      style={{ left: `${(abRepeatB / totalDuration) * 100}%` }}
+                    />
+                  )}
+                </div>
+                <span className="text-xs text-slate-400 font-mono whitespace-nowrap">{fmt(totalDuration)}</span>
+              </div>
+
+              {/* 再生コントロール */}
+              <button
+                className="w-9 h-9 flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
+                disabled={!notes.length || isPlaying}
+                onClick={play}
+                title="再生"
+              >
+                ▶
+              </button>
+              <button
+                className="w-9 h-9 flex items-center justify-center bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
+                disabled={!isPlaying}
+                onClick={pause}
+                title="一時停止"
+              >
+                ⏸
+              </button>
+              <button
+                className="w-9 h-9 flex items-center justify-center bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
+                disabled={!notes.length}
+                onClick={() => stop(true)}
+                title="停止"
+              >
+                ⏹
+              </button>
             </div>
 
-            {/* 再生コントロール */}
-            <button
-              className="w-9 h-9 flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
-              disabled={!notes.length || isPlaying}
-              onClick={play}
-              title="再生"
-            >
-              ▶
-            </button>
-            <button
-              className="w-9 h-9 flex items-center justify-center bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
-              disabled={!isPlaying}
-              onClick={pause}
-              title="一時停止"
-            >
-              ⏸
-            </button>
-            <button
-              className="w-9 h-9 flex items-center justify-center bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
-              disabled={!notes.length}
-              onClick={() => stop(true)}
-              title="停止"
-            >
-              ⏹
-            </button>
+            {/* 2行目: A-Bリピート・速度・エフェクト・その他設定 */}
+            <div className="h-[40px] flex items-center px-3 gap-2 border-t border-slate-700/50">
+              {/* A-Bリピートコントロール */}
+              <button
+                className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={setPointA}
+                disabled={!notes.length}
+                title="A点設定"
+              >
+                A
+              </button>
+              <button
+                className="px-2 py-1 text-xs rounded bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={setPointB}
+                disabled={!notes.length || abRepeatA == null}
+                title="B点設定"
+              >
+                B
+              </button>
+              <label className="flex items-center gap-1 cursor-pointer text-xs">
+                <input
+                  type="checkbox"
+                  checked={abRepeatEnabled}
+                  onChange={e => setAbRepeatEnabled(e.target.checked)}
+                  disabled={abRepeatA == null || abRepeatB == null}
+                  className="w-3 h-3"
+                />
+                <span className={abRepeatA == null || abRepeatB == null ? "opacity-50" : ""}>リピート</span>
+              </label>
+              <button
+                className="px-2 py-1 text-xs rounded bg-slate-600 hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={clearAbRepeat}
+                disabled={abRepeatA == null && abRepeatB == null}
+                title="A-B点クリア"
+              >
+                クリア
+              </button>
+              {abRepeatA != null && (
+                <span className="text-xs text-blue-300">A:{fmt(abRepeatA)}</span>
+              )}
+              {abRepeatB != null && (
+                <span className="text-xs text-red-300">B:{fmt(abRepeatB)}</span>
+              )}
 
-            {/* 速度セレクター */}
-            <select
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition"
-              value={rate}
-              onChange={e => setRate(parseFloat(e.target.value))}
-              title="再生速度"
-            >
-              {speedOptions.map(v => (
-                <option key={v} value={v}>
-                  {Math.round(v * 100)}%
-                </option>
-              ))}
-            </select>
+              <div className="flex-1" />
 
-            {/* クイック設定: エフェクト */}
-            <select
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition"
-              value={effectLevel}
-              onChange={e => setEffectLevel(e.target.value)}
-              title="エフェクト"
-            >
-              <option value="focus">🎯 集中</option>
-              <option value="standard">✨ 標準</option>
-              <option value="fun-refined">🎉 洗練</option>
-              <option value="fun-elegant">🌟 エレガント</option>
-              <option value="fun-colorful">🎪 カラフル</option>
-              <option value="fun-original">💫 オリジナル</option>
-            </select>
+              {/* 速度セレクター */}
+              <select
+                className="h-7 px-2 bg-slate-800 hover:bg-slate-700 rounded text-xs transition"
+                value={rate}
+                onChange={e => setRate(parseFloat(e.target.value))}
+                title="再生速度"
+              >
+                {speedOptions.map(v => (
+                  <option key={v} value={v}>
+                    {Math.round(v * 100)}%
+                  </option>
+                ))}
+              </select>
 
-            {/* クイック設定: ノート装飾 */}
-            <select
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition"
-              value={noteStyle}
-              onChange={e => setNoteStyle(e.target.value)}
-              title="ノート装飾"
-            >
-              <option value="rect">シンプル</option>
-              <option value="note-jp">🎵 ドレミ</option>
-              <option value="note-en">🎵 CDE</option>
-              <option value="star">⭐ 星</option>
-              <option value="heart">❤️ ハート</option>
-            </select>
+              {/* クイック設定: エフェクト */}
+              <select
+                className="h-7 px-2 bg-slate-800 hover:bg-slate-700 rounded text-xs transition"
+                value={effectLevel}
+                onChange={e => setEffectLevel(e.target.value)}
+                title="エフェクト"
+              >
+                <option value="focus">🎯 集中</option>
+                <option value="standard">✨ 標準</option>
+                <option value="fun-refined">🎉 洗練</option>
+                <option value="fun-elegant">🌟 エレガント</option>
+                <option value="fun-colorful">🎪 カラフル</option>
+                <option value="fun-original">💫 オリジナル</option>
+              </select>
 
-            {/* クイック設定: 鍵盤範囲 */}
-            <select
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition"
-              value={rangePreset}
-              onChange={e => setRangePreset(e.target.value)}
-              title="鍵盤範囲"
-            >
-              <option value="auto">Auto</option>
-              <option value="48">48鍵</option>
-              <option value="61">61鍵</option>
-              <option value="76">76鍵</option>
-              <option value="88">88鍵</option>
-            </select>
+              {/* クイック設定: ノート装飾 */}
+              <select
+                className="h-7 px-2 bg-slate-800 hover:bg-slate-700 rounded text-xs transition"
+                value={noteStyle}
+                onChange={e => setNoteStyle(e.target.value)}
+                title="ノート装飾"
+              >
+                <option value="rect">シンプル</option>
+                <option value="note-jp">🎵 ドレミ</option>
+                <option value="note-en">🎵 CDE</option>
+                <option value="star">⭐ 星</option>
+                <option value="heart">❤️ ハート</option>
+              </select>
 
-            {/* フォーカスモード切替 */}
-            <button
-              className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
-              onClick={() => setFocusMode(true)}
-              title="フォーカスモード"
-            >
-              🎯
-            </button>
+              {/* クイック設定: 鍵盤範囲 */}
+              <select
+                className="h-7 px-2 bg-slate-800 hover:bg-slate-700 rounded text-xs transition"
+                value={rangePreset}
+                onChange={e => setRangePreset(e.target.value)}
+                title="鍵盤範囲"
+              >
+                <option value="auto">Auto</option>
+                <option value="48">48鍵</option>
+                <option value="61">61鍵</option>
+                <option value="76">76鍵</option>
+                <option value="88">88鍵</option>
+              </select>
 
-            {/* 設定ボタン */}
-            <button
-              className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
-              onClick={() => setSettingsOpen(true)}
-              title="設定"
-            >
-              ⚙
-            </button>
+              {/* フォーカスモード切替 */}
+              <button
+                className="w-7 h-7 flex items-center justify-center hover:bg-slate-800 rounded transition text-sm"
+                onClick={() => setFocusMode(true)}
+                title="フォーカスモード"
+              >
+                🎯
+              </button>
+
+              {/* 設定ボタン */}
+              <button
+                className="w-7 h-7 flex items-center justify-center hover:bg-slate-800 rounded transition text-sm"
+                onClick={() => setSettingsOpen(true)}
+                title="設定"
+              >
+                ⚙
+              </button>
+            </div>
           </header>
 
           {/* メインコンテンツエリア */}
@@ -2231,91 +2325,7 @@ useEffect(() => {
               <canvas ref={canvasRef} className="w-full h-full block" />
             </div>
 
-            {/* シークバー & A-Bコントロールエリア */}
-            <div className="bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 py-2 space-y-2 shrink-0">
-              {/* 進捗表示 */}
-              <div className="flex items-center justify-between text-xs text-slate-300">
-                <span className="font-mono">{fmt(playhead)} / {fmt(totalDuration)}</span>
-                <span className="text-slate-400">{progressPercent}%</span>
-              </div>
-
-              {/* シークバー */}
-              <div className="relative">
-                <input
-                  type="range"
-                  min={0}
-                  max={totalDuration || 1}
-                  step={0.01}
-                  value={playhead}
-                  onChange={handleSeekChange}
-                  onMouseDown={handleSeekStart}
-                  onMouseUp={handleSeekEnd}
-                  onTouchStart={handleSeekStart}
-                  onTouchEnd={handleSeekEnd}
-                  disabled={!notes.length}
-                  className="w-full h-3 bg-slate-700 rounded-lg appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    background: notes.length ? `linear-gradient(to right, #10b981 0%, #10b981 ${progressPercent}%, #334155 ${progressPercent}%, #334155 100%)` : '#334155'
-                  }}
-                />
-                {/* A-Bリピートマーカー */}
-                {abRepeatA != null && totalDuration > 0 && (
-                  <div
-                    className="absolute top-0 h-3 w-1 bg-blue-400 pointer-events-none"
-                    style={{ left: `${(abRepeatA / totalDuration) * 100}%` }}
-                  />
-                )}
-                {abRepeatB != null && totalDuration > 0 && (
-                  <div
-                    className="absolute top-0 h-3 w-1 bg-red-400 pointer-events-none"
-                    style={{ left: `${(abRepeatB / totalDuration) * 100}%` }}
-                  />
-                )}
-              </div>
-
-              {/* A-Bリピートコントロール */}
-              <div className="flex items-center gap-2 text-xs">
-                <button
-                  className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={setPointA}
-                  disabled={!notes.length}
-                  title="A点設定"
-                >
-                  A
-                </button>
-                <button
-                  className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={setPointB}
-                  disabled={!notes.length || abRepeatA == null}
-                  title="B点設定"
-                >
-                  B
-                </button>
-                <label className="flex items-center gap-1 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={abRepeatEnabled}
-                    onChange={e => setAbRepeatEnabled(e.target.checked)}
-                    disabled={abRepeatA == null || abRepeatB == null}
-                  />
-                  <span className={abRepeatA == null || abRepeatB == null ? "opacity-50" : ""}>A-Bリピート</span>
-                </label>
-                <button
-                  className="px-2 py-1 rounded bg-slate-600 hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={clearAbRepeat}
-                  disabled={abRepeatA == null && abRepeatB == null}
-                  title="A-B点クリア"
-                >
-                  クリア
-                </button>
-                {abRepeatA != null && (
-                  <span className="text-blue-300">A: {fmt(abRepeatA)}</span>
-                )}
-                {abRepeatB != null && (
-                  <span className="text-red-300 ml-2">B: {fmt(abRepeatB)}</span>
-                )}
-              </div>
-            </div>
+            {/* シークバー & A-Bコントロールは上部ヘッダーに移動済み */}
           </main>
 
           {/* 左サイドメニューパネル */}
