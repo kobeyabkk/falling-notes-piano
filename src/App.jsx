@@ -19,7 +19,7 @@ const MAX_VISIBLE_KEYS = KEY_COUNT; // 既存の上限そのまま
 
 const NOTE_MIN_HEIGHT = 10;
 const SPEED = 140;     // px/sec
-const KB_HEIGHT = 140; // keyboard height (px)
+const KB_HEIGHT = 100; // keyboard height (px) - 画面の約1/4を想定
 const VISUAL_MAX_SEC = 2.5; // 表示上の最大長（音は実長で鳴らす）
 const STOP_TAIL = 1.0; // 自動停止の安全マージン（秒）
 
@@ -838,7 +838,25 @@ useEffect(() => {
   useEffect(()=>{
     const handle=()=>onResize();
     window.addEventListener("resize", handle);
-    return ()=>window.removeEventListener("resize", handle);
+    
+    // タブが表示された時にリサイズ（タブ切り替え対応）
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        setTimeout(() => onResize(), 50);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    
+    // 初回リサイズを遅延実行
+    const timeout = setTimeout(() => {
+      onResize();
+    }, 100);
+    
+    return ()=>{
+      window.removeEventListener("resize", handle);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clearTimeout(timeout);
+    };
   },[notes, viewMinMidi, viewMaxMidi, requestFrameBoost]);
 
   useEffect(()=>()=>cancelRAF(),[]);
@@ -847,6 +865,26 @@ useEffect(() => {
     const c = canvasRef.current; if(!c) return;
     const dpr = window.devicePixelRatio||1;
     const rect = c.getBoundingClientRect();
+    
+    // サイズが0の場合は処理をスキップ
+    if(rect.width === 0 || rect.height === 0) {
+      return;
+    }
+    
+    // 前回と同じサイズなら処理をスキップ（最適化）
+    const prevSize = canvasSizeRef.current;
+    if(prevSize && Math.abs(prevSize.W - rect.width) < 1 && Math.abs(prevSize.H - rect.height) < 1) {
+      return;
+    }
+    
+    // デバッグログ: 画面サイズとキャンバスサイズを記録
+    console.log('[Canvas Resize]', {
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      cssSize: { w: rect.width, h: rect.height },
+      canvasSize: { w: Math.floor(rect.width*dpr), h: Math.floor(rect.height*dpr) },
+      dpr: dpr
+    });
+    
     c.width = Math.floor(rect.width*dpr);
     c.height = Math.floor(rect.height*dpr);
     c.getContext("2d").setTransform(dpr,0,0,dpr,0,0);
@@ -2098,7 +2136,18 @@ useEffect(() => {
       ) : (
         <>
           {/* コンパクトヘッダー（50px） */}
-          <header className="h-[50px] bg-slate-900/95 backdrop-blur border-b border-slate-800 flex items-center px-3 gap-2 shrink-0">
+          <header className="h-[50px] bg-slate-900/95 backdrop-blur border-b border-slate-800 flex items-center px-3 gap-2 shrink-0 relative z-50">
+            {/* ファイル読み込みボタン */}
+            <label className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition cursor-pointer" title="MIDI読み込み">
+              <span className="text-lg">📁</span>
+              <input
+                type="file"
+                accept=".mid,.midi"
+                className="hidden"
+                onChange={onFile}
+              />
+            </label>
+
             {/* メニューボタン */}
             <button
               className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
@@ -2216,14 +2265,14 @@ useEffect(() => {
           </header>
 
           {/* メインコンテンツエリア */}
-          <main className="flex-1 flex flex-col min-h-0">
+          <main className="flex flex-col" style={{ height: 'calc(100vh - 50px)' }}>
             {/* キャンバスエリア */}
-            <div className="flex-1 relative">
+            <div className="relative" style={{ flex: '1 1 0', minHeight: 0 }}>
               <canvas ref={canvasRef} className="w-full h-full block" />
             </div>
 
             {/* シークバー & A-Bコントロールエリア */}
-            <div className="bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 py-2 space-y-2 shrink-0">
+            <div className="bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 py-2 space-y-2" style={{ flexShrink: 0 }}>
               {/* 進捗表示 */}
               <div className="flex items-center justify-between text-xs text-slate-300">
                 <span className="font-mono">{fmt(playhead)} / {fmt(totalDuration)}</span>
