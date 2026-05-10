@@ -42,10 +42,10 @@ const COLORS = {
   blackKey: "#2b2f36",
   keyBorder: "#cfd4da",
   keyShadow: "rgba(0,0,0,0.4)",
-  noteWhite: "#4fb0ff",
-  noteWhiteActive: "#7fc9ff",
-  noteBlack: "#ff6b6b",
-  noteBlackActive: "#ff8d8d",
+  noteWhite: "#3aa6ff",
+  noteWhiteActive: "#7fd5ff",
+  noteBlack: "#ff5577",
+  noteBlackActive: "#ff8da3",
   keyActiveWhite: "#9ad1ff",
   keyActiveBlack: "#ff8d8d",
   text: "#e7eef7",
@@ -74,7 +74,7 @@ const DevStatsOverlay = React.memo(function DevStatsOverlay({ visible, fps, drop
 });
 
 function addRoundedRectPath(ctx, x, y, w, h) {
-  const r = Math.min(6, w * 0.3);
+  const r = Math.max(0, Math.min(8, w * 0.35, h * 0.5));
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
   ctx.arcTo(x + w, y + h, x, y + h, r);
@@ -775,7 +775,7 @@ useEffect(() => {
     setAudioReady(true);
 
     const raf = requestAnimationFrame(() => {
-      onResize();
+      syncCanvasSize();
       requestFrameBoost();
     });
     return ()=>{
@@ -883,13 +883,6 @@ useEffect(() => {
     if (prev && prev.W === cssW && prev.H === cssH && prev.dpr === dpr) {
       return;
     }
-
-    console.log('[Canvas Resize]', {
-      viewport: { w: window.innerWidth, h: window.innerHeight },
-      cssSize: { w: cssW, h: cssH },
-      canvasBuffer: { w: pixelW, h: pixelH },
-      dpr: dpr
-    });
 
     // Canvas解像度の設定
     c.width = pixelW;
@@ -1671,9 +1664,23 @@ useEffect(() => {
         addRoundedRectPath(ctx, box.x, box.y, box.w, box.h);
       }
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.12)";
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
       ctx.lineWidth = 1;
       ctx.stroke();
+
+      if(effectLevel !== "focus"){
+        ctx.save();
+        ctx.fillStyle = "rgba(255,255,255,0.22)";
+        for(const box of boxes){
+          const glossW = box.w - 2;
+          const glossH = Math.min(box.h * 0.35, 14);
+          if(glossW <= 0 || glossH < 2) continue;
+          ctx.beginPath();
+          addRoundedRectPath(ctx, box.x + 1, box.y + 1, glossW, glossH);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
     }
 
     if(shouldDrawOverlay && overlayShapes.length){
@@ -2084,19 +2091,24 @@ useEffect(() => {
 
     // 10. ラベル
     if(labelMode !== "none"){
+      const isJp = labelMode === "DoReMi" || labelMode === "c-only-jp";
+      const isEn = labelMode === "AG" || labelMode === "c-only-en";
+      const cOnly = labelMode === "c-only-jp" || labelMode === "c-only-en";
+
       ctx.save();
       ctx.fillStyle = COLORS.label;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.font = "11px ui-sans-serif, system-ui";
+      ctx.font = `bold ${cOnly ? 13 : 11}px ui-sans-serif, system-ui`;
 
       for(let m = minMidi; m <= maxMidi; m++){
         const layout = keyLayout.get(m);
         if(!layout || !layout.isWhite) continue;
+        if(cOnly && (m % 12) !== 0) continue;
 
         const cx = layout.x + layout.w / 2;
-        const { name, octave } = (labelMode === "AG") ? nameAG(m) : nameDoReMi(m);
-        const text = (labelMode === "AG") ? `${name}${octave}` : name;
+        const { name, octave } = isJp ? nameDoReMi(m) : nameAG(m);
+        const text = (isEn || cOnly) ? `${name}${octave}` : name;
         ctx.fillText(text, cx, layout.y + layout.h - 12);
       }
       ctx.restore();
@@ -2134,7 +2146,7 @@ useEffect(() => {
 
 
   return (
-    <div className="grid h-screen grid-rows-[50px_1fr] bg-slate-900 text-slate-100 overflow-hidden">
+    <div className="grid h-screen grid-rows-[60px_1fr] bg-slate-900 text-slate-100 overflow-hidden">
       {/* フォーカスモード: キャンバスのみ表示 */}
       {focusMode ? (
         <div className="col-span-full row-span-full relative">
@@ -2152,10 +2164,10 @@ useEffect(() => {
         </div>
       ) : (
         <>
-          {/* コンパクトヘッダー（50px） */}
-          <header className="row-start-1 h-[50px] bg-slate-900/95 backdrop-blur border-b border-slate-800 flex items-center px-3 gap-2 shrink-0 relative z-50">
+          {/* コンパクトヘッダー（60px） */}
+          <header className="row-start-1 h-[60px] bg-slate-900/95 backdrop-blur border-b border-slate-800 flex items-center px-3 gap-2 shrink-0 relative z-50">
             {/* ファイル読み込みボタン */}
-            <label className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition cursor-pointer" title="MIDI読み込み">
+            <label className="w-11 h-11 flex items-center justify-center hover:bg-slate-800 rounded-lg transition cursor-pointer" title="MIDI読み込み">
               <span className="text-lg">📁</span>
               <input
                 type="file"
@@ -2167,7 +2179,7 @@ useEffect(() => {
 
             {/* メニューボタン */}
             <button
-              className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
+              className="w-11 h-11 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
               onClick={() => setMenuOpen(true)}
               title="メニュー"
             >
@@ -2175,13 +2187,13 @@ useEffect(() => {
             </button>
 
             {/* 曲名表示 */}
-            <div className="flex-1 min-w-0 text-sm font-medium truncate px-2">
+            <div className="flex-1 min-w-0 text-base font-medium truncate px-2">
               {name || "No file loaded"}
             </div>
 
             {/* 再生コントロール */}
             <button
-              className="w-9 h-9 flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
+              className="w-11 h-11 flex items-center justify-center bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
               disabled={!notes.length || isPlaying}
               onClick={play}
               title="再生"
@@ -2189,7 +2201,7 @@ useEffect(() => {
               ▶
             </button>
             <button
-              className="w-9 h-9 flex items-center justify-center bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
+              className="w-11 h-11 flex items-center justify-center bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
               disabled={!isPlaying}
               onClick={pause}
               title="一時停止"
@@ -2197,7 +2209,7 @@ useEffect(() => {
               ⏸
             </button>
             <button
-              className="w-9 h-9 flex items-center justify-center bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
+              className="w-11 h-11 flex items-center justify-center bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition"
               disabled={!notes.length}
               onClick={() => stop(true)}
               title="停止"
@@ -2207,7 +2219,7 @@ useEffect(() => {
 
             {/* 速度セレクター */}
             <select
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition"
+              className="hidden xl:block h-11 px-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-base transition"
               value={rate}
               onChange={e => setRate(parseFloat(e.target.value))}
               title="再生速度"
@@ -2221,7 +2233,7 @@ useEffect(() => {
 
             {/* クイック設定: エフェクト */}
             <select
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition"
+              className="hidden xl:block h-11 px-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-base transition"
               value={effectLevel}
               onChange={e => setEffectLevel(e.target.value)}
               title="エフェクト"
@@ -2236,7 +2248,7 @@ useEffect(() => {
 
             {/* クイック設定: ノート装飾 */}
             <select
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition"
+              className="hidden xl:block h-11 px-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-base transition"
               value={noteStyle}
               onChange={e => setNoteStyle(e.target.value)}
               title="ノート装飾"
@@ -2250,7 +2262,7 @@ useEffect(() => {
 
             {/* クイック設定: 鍵盤範囲 */}
             <select
-              className="h-9 px-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition"
+              className="hidden xl:block h-11 px-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-base transition"
               value={rangePreset}
               onChange={e => setRangePreset(e.target.value)}
               title="鍵盤範囲"
@@ -2264,7 +2276,7 @@ useEffect(() => {
 
             {/* フォーカスモード切替 */}
             <button
-              className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
+              className="w-11 h-11 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
               onClick={() => setFocusMode(true)}
               title="フォーカスモード"
             >
@@ -2273,7 +2285,7 @@ useEffect(() => {
 
             {/* 設定ボタン */}
             <button
-              className="w-9 h-9 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
+              className="w-11 h-11 flex items-center justify-center hover:bg-slate-800 rounded-lg transition"
               onClick={() => setSettingsOpen(true)}
               title="設定"
             >
@@ -2291,9 +2303,9 @@ useEffect(() => {
             {/* シークバー & A-Bコントロールエリア */}
             <div className="bg-slate-900/95 backdrop-blur border-t border-slate-800 px-3 py-2 space-y-2 shrink-0">
               {/* 進捗表示 */}
-              <div className="flex items-center justify-between text-xs text-slate-300">
+              <div className="flex items-center justify-between text-sm text-slate-100">
                 <span className="font-mono">{fmt(playhead)} / {fmt(totalDuration)}</span>
-                <span className="text-slate-400">{progressPercent}%</span>
+                <span className="text-slate-200">{progressPercent}%</span>
               </div>
 
               {/* シークバー */}
@@ -2331,9 +2343,9 @@ useEffect(() => {
               </div>
 
               {/* A-Bリピートコントロール */}
-              <div className="flex items-center gap-2 text-xs">
+              <div className="flex items-center gap-2 text-sm">
                 <button
-                  className="px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed min-w-[44px] min-h-[44px]"
                   onClick={setPointA}
                   disabled={!notes.length}
                   title="A点設定"
@@ -2341,7 +2353,7 @@ useEffect(() => {
                   A
                 </button>
                 <button
-                  className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 rounded bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed min-w-[44px] min-h-[44px]"
                   onClick={setPointB}
                   disabled={!notes.length || abRepeatA == null}
                   title="B点設定"
@@ -2358,7 +2370,7 @@ useEffect(() => {
                   <span className={abRepeatA == null || abRepeatB == null ? "opacity-50" : ""}>A-Bリピート</span>
                 </label>
                 <button
-                  className="px-2 py-1 rounded bg-slate-600 hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-4 py-2 rounded bg-slate-600 hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px]"
                   onClick={clearAbRepeat}
                   disabled={abRepeatA == null && abRepeatB == null}
                   title="A-B点クリア"
@@ -2388,7 +2400,7 @@ useEffect(() => {
                   <div className="flex items-center justify-between border-b border-slate-700 pb-3">
                     <h2 className="text-lg font-semibold">メニュー</h2>
                     <button
-                      className="w-8 h-8 flex items-center justify-center hover:bg-slate-700 rounded transition"
+                      className="w-11 h-11 flex items-center justify-center hover:bg-slate-700 rounded transition"
                       onClick={() => setMenuOpen(false)}
                     >
                       ✕
@@ -2396,18 +2408,18 @@ useEffect(() => {
                   </div>
 
                   {/* オンライン/オフライン状態 */}
-                  <div className={`px-3 py-2 rounded-lg text-xs ${onlineStatusClass}`}>
+                  <div className={`px-3 py-2 rounded-lg text-sm ${onlineStatusClass}`}>
                     {onlineStatusLabel}
                   </div>
                   {isOfflineMode && (
-                    <div className="text-xs text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-lg px-3 py-2">
+                    <div className="text-sm text-amber-200 bg-amber-900/20 border border-amber-400/40 rounded-lg px-3 py-2">
                       オフライン中は生成・外部音源が無効です
                     </div>
                   )}
 
                   {/* ファイル操作 */}
                   <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-slate-300">ファイル</h3>
+                    <h3 className="text-base font-semibold text-slate-100">ファイル</h3>
                     <label className="block w-full px-4 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg cursor-pointer text-center transition">
                       MIDI読み込み
                       <input
@@ -2434,10 +2446,10 @@ useEffect(() => {
 
                   {/* 楽曲生成 */}
                   <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-slate-300">楽曲生成</h3>
+                    <h3 className="text-base font-semibold text-slate-100">楽曲生成</h3>
                     
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="w-16 text-slate-400">Key</span>
+                    <div className="flex items-center gap-2 text-base">
+                      <span className="w-16 text-slate-200">Key</span>
                       <select className="flex-1 bg-slate-700 rounded-lg px-3 py-2" value={genKey} onChange={e => setGenKey(e.target.value)}>
                         {["C", "D", "E", "F", "G", "A", "B"].map(k => (
                           <option key={k} value={k}>{k}</option>
@@ -2449,8 +2461,8 @@ useEffect(() => {
                       </select>
                     </div>
 
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="w-16 text-slate-400">Tempo</span>
+                    <div className="flex items-center gap-2 text-base">
+                      <span className="w-16 text-slate-200">Tempo</span>
                       <input
                         type="number"
                         min={50}
@@ -2459,11 +2471,11 @@ useEffect(() => {
                         value={genTempo}
                         onChange={e => setGenTempo(parseInt(e.target.value || "90"))}
                       />
-                      <span className="text-slate-400">bpm</span>
+                      <span className="text-slate-200">bpm</span>
                     </div>
 
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="w-16 text-slate-400">Bars</span>
+                    <div className="flex items-center gap-2 text-base">
+                      <span className="w-16 text-slate-200">Bars</span>
                       <input
                         type="number"
                         min={2}
@@ -2475,9 +2487,9 @@ useEffect(() => {
                     </div>
 
                     <div className="space-y-1">
-                      <span className="text-sm text-slate-400">難易度</span>
+                      <span className="text-base text-slate-200">難易度</span>
                       <select
-                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-sm"
+                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-base"
                         value={genDifficulty}
                         onChange={e => setGenDifficulty(parseInt(e.target.value))}
                       >
@@ -2489,9 +2501,9 @@ useEffect(() => {
                     </div>
 
                     <div className="space-y-1">
-                      <span className="text-sm text-slate-400">パターン</span>
+                      <span className="text-base text-slate-200">パターン</span>
                       <select
-                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-base disabled:opacity-50 disabled:cursor-not-allowed"
                         value={genType}
                         onChange={e => setGenType(e.target.value)}
                         disabled={genDifficulty !== 0}
@@ -2529,20 +2541,80 @@ useEffect(() => {
                   <div className="flex items-center justify-between border-b border-slate-700 pb-3">
                     <h2 className="text-lg font-semibold">設定</h2>
                     <button
-                      className="w-8 h-8 flex items-center justify-center hover:bg-slate-700 rounded transition"
+                      className="w-11 h-11 flex items-center justify-center hover:bg-slate-700 rounded transition"
                       onClick={() => setSettingsOpen(false)}
                     >
                       ✕
                     </button>
                   </div>
 
+                  {/* クイック設定（狭い画面ではここから操作） */}
+                  <div className="space-y-2 xl:hidden">
+                    <h3 className="text-base font-semibold text-slate-100">クイック設定</h3>
+                    <div className="space-y-1">
+                      <span className="text-base text-slate-200">再生速度</span>
+                      <select
+                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-base"
+                        value={rate}
+                        onChange={e => setRate(parseFloat(e.target.value))}
+                      >
+                        {speedOptions.map(v => (
+                          <option key={v} value={v}>{Math.round(v * 100)}%</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-base text-slate-200">エフェクト</span>
+                      <select
+                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-base"
+                        value={effectLevel}
+                        onChange={e => setEffectLevel(e.target.value)}
+                      >
+                        <option value="focus">🎯 集中</option>
+                        <option value="standard">✨ 標準</option>
+                        <option value="fun-refined">🎉 洗練</option>
+                        <option value="fun-elegant">🌟 エレガント</option>
+                        <option value="fun-colorful">🎪 カラフル</option>
+                        <option value="fun-original">💫 オリジナル</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-base text-slate-200">ノート装飾</span>
+                      <select
+                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-base"
+                        value={noteStyle}
+                        onChange={e => setNoteStyle(e.target.value)}
+                      >
+                        <option value="rect">シンプル</option>
+                        <option value="note-jp">🎵 ドレミ</option>
+                        <option value="note-en">🎵 CDE</option>
+                        <option value="star">⭐ 星</option>
+                        <option value="heart">❤️ ハート</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-base text-slate-200">鍵盤範囲</span>
+                      <select
+                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-base"
+                        value={rangePreset}
+                        onChange={e => setRangePreset(e.target.value)}
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="48">48鍵</option>
+                        <option value="61">61鍵</option>
+                        <option value="76">76鍵</option>
+                        <option value="88">88鍵</option>
+                      </select>
+                    </div>
+                  </div>
+
                   {/* サウンド設定 */}
                   <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-slate-300">サウンド</h3>
+                    <h3 className="text-base font-semibold text-slate-100">サウンド</h3>
                     <div className="space-y-1">
-                      <span className="text-sm text-slate-400">音源</span>
+                      <span className="text-base text-slate-200">音源</span>
                       <select
-                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-base disabled:opacity-50 disabled:cursor-not-allowed"
                         value={sound}
                         onChange={e => setSound(e.target.value)}
                         disabled={isOfflineMode}
@@ -2552,69 +2624,71 @@ useEffect(() => {
                         <option value="piano">Piano</option>
                         <option value="piano-bright">Piano (Bright)</option>
                       </select>
-                      <div className="text-xs text-slate-400">
+                      <div className="text-sm text-slate-200">
                         {soundLoading ? "loading…" : instReady ? "ready" : "initializing…"}
                       </div>
                       {isOfflineMode && (
-                        <div className="text-xs text-amber-200">オフライン中はSynthのみ</div>
+                        <div className="text-sm text-amber-200">オフライン中はSynthのみ</div>
                       )}
                     </div>
                   </div>
 
                   {/* 表示設定 */}
                   <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-slate-300">表示</h3>
-                    
+                    <h3 className="text-base font-semibold text-slate-100">表示</h3>
+
                     <div className="space-y-1">
-                      <span className="text-sm text-slate-400">ラベル</span>
+                      <span className="text-base text-slate-200">鍵盤ラベル</span>
                       <select
-                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-sm"
+                        className="w-full bg-slate-700 rounded-lg px-3 py-2 text-base"
                         value={labelMode}
                         onChange={e => setLabelMode(e.target.value)}
                       >
                         <option value="none">非表示</option>
-                        <option value="AG">A–G（英名）</option>
-                        <option value="DoReMi">ドレミ</option>
+                        <option value="c-only-jp">ド のみ（オクターブ把握用）</option>
+                        <option value="c-only-en">C のみ（オクターブ把握用）</option>
+                        <option value="DoReMi">すべて（ドレミ）</option>
+                        <option value="AG">すべて（CDE）</option>
                       </select>
                     </div>
                   </div>
 
                   {/* 再生設定 */}
                   <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-slate-300">再生</h3>
+                    <h3 className="text-base font-semibold text-slate-100">再生</h3>
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={loopEnabled}
                         onChange={e => setLoopEnabled(e.target.checked)}
                       />
-                      <span className="text-sm">ループ再生</span>
+                      <span className="text-base">ループ再生</span>
                     </label>
                   </div>
 
                   {/* オフライン設定 */}
                   <div className="space-y-2 border-t border-slate-700 pt-3">
-                    <h3 className="text-sm font-semibold text-slate-300">オフライン</h3>
-                    <div className="flex items-center gap-2 text-xs">
+                    <h3 className="text-base font-semibold text-slate-100">オフライン</h3>
+                    <div className="flex items-center gap-2 text-sm">
                       <span className={`px-2 py-1 rounded-full ${offlineReady ? "bg-emerald-600/30 text-emerald-100" : "bg-amber-600/30 text-amber-100"}`}>
                         {offlineReady ? "準備OK" : "未準備"}
                       </span>
                       {swVersion && (
-                        <span className="text-slate-400">SW {swVersion}</span>
+                        <span className="text-slate-200">SW {swVersion}</span>
                       )}
                     </div>
                     <button
-                      className="w-full px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm transition"
+                      className="w-full px-3 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-base transition"
                       onClick={handleManualPrecache}
                       disabled={precacheState.status === "running"}
                     >
                       オフライン準備を実行
                     </button>
                     {precacheState.status === "running" && (
-                      <div className="text-xs text-amber-200">キャッシュ中…</div>
+                      <div className="text-sm text-amber-200">キャッシュ中…</div>
                     )}
                     {precacheState.status === "done" && (
-                      <div className="text-xs text-emerald-300">
+                      <div className="text-sm text-emerald-300">
                         完了 ({precacheState.detail?.cached ?? 0}/{precacheState.detail?.total ?? 0})
                       </div>
                     )}
@@ -2623,14 +2697,14 @@ useEffect(() => {
                   {/* 開発者メニュー */}
                   <div className="border-t border-slate-700 pt-3">
                     <button
-                      className="text-xs underline decoration-dotted text-slate-400"
+                      className="text-sm underline decoration-dotted text-slate-200"
                       onClick={()=>setDevPanelOpen(v=>!v)}
                     >
                       開発者メニューを{devPanelOpen ? "閉じる" : "開く"}
                     </button>
 
                     {devPanelOpen && (
-                      <div className="mt-3 space-y-3 rounded-lg bg-slate-900/40 p-3 text-xs">
+                      <div className="mt-3 space-y-3 rounded-lg bg-slate-900/40 p-3 text-sm">
                         <div className="flex flex-wrap gap-2">
                           <button
                             className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"
@@ -2681,22 +2755,22 @@ useEffect(() => {
           <div className="bg-slate-800 rounded-xl p-4 w-[560px] max-w-[90%] max-h-[80vh] flex flex-col">
             <div className="flex items-center mb-3">
               <h2 className="text-lg font-semibold">ライブラリ</h2>
-              <button className="ml-auto w-8 h-8 flex items-center justify-center hover:bg-slate-700 rounded" onClick={() => setLibOpen(false)}>
+              <button className="ml-auto w-11 h-11 flex items-center justify-center hover:bg-slate-700 rounded" onClick={() => setLibOpen(false)}>
                 ✕
               </button>
             </div>
             <div className="space-y-2 overflow-auto flex-1">
-              {libItems.length === 0 && <div className="opacity-70 text-sm">保存された曲はありません。</div>}
+              {libItems.length === 0 && <div className="opacity-70 text-base">保存された曲はありません。</div>}
               {libItems.map(item => (
                 <div key={item.id} className="flex items-center gap-2 bg-slate-700/60 rounded px-3 py-2">
                   <div className="flex-1 min-w-0">
                     <div className="font-medium truncate">{item.name || "(無題)"}</div>
-                    <div className="text-xs opacity-70">{fmtDate(item.createdAt)}・{(item.size / 1024).toFixed(1)} KB</div>
+                    <div className="text-sm opacity-70">{fmtDate(item.createdAt)}・{(item.size / 1024).toFixed(1)} KB</div>
                   </div>
-                  <button className="px-3 py-2 bg-indigo-600 rounded hover:bg-indigo-500 text-sm" onClick={() => loadFromLibrary(item.id)}>
+                  <button className="px-3 py-2 bg-indigo-600 rounded hover:bg-indigo-500 text-base" onClick={() => loadFromLibrary(item.id)}>
                     読込
                   </button>
-                  <button className="px-3 py-2 bg-rose-700 rounded hover:bg-rose-600 text-sm" onClick={() => removeFromLibrary(item.id)}>
+                  <button className="px-3 py-2 bg-rose-700 rounded hover:bg-rose-600 text-base" onClick={() => removeFromLibrary(item.id)}>
                     削除
                   </button>
                 </div>
@@ -2715,13 +2789,13 @@ useEffect(() => {
       {updateToast && (
         <div className="fixed inset-x-0 bottom-4 z-50 px-4 flex justify-center">
           <div className="bg-slate-900/95 border border-slate-700 text-slate-100 rounded-2xl px-4 py-3 shadow-xl flex flex-wrap items-center gap-3 max-w-xl w-full">
-            <div className="flex-1 text-sm">
+            <div className="flex-1 text-base">
               {updateToast.status === "applying"
                 ? "更新を適用中です…数秒お待ちください。"
                 : "新しいバージョンがあります。更新しますか？"}
             </div>
             {updateToast.status === "applying" ? (
-              <span className="text-xs opacity-70">反映中…</span>
+              <span className="text-sm opacity-70">反映中…</span>
             ) : (
               <>
                 <button className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500" onClick={handleUpdateNow}>
