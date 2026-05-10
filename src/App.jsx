@@ -19,7 +19,7 @@ const MAX_VISIBLE_KEYS = KEY_COUNT; // 既存の上限そのまま
 
 const NOTE_MIN_HEIGHT = 10;
 const SPEED = 140;     // px/sec
-const KB_HEIGHT = 100; // keyboard height (px) - 画面の約1/4を想定
+const KB_HEIGHT = 140; // keyboard height (px) - iPad で「見窄らしい」と感じない高さ
 const VISUAL_MAX_SEC = 2.5; // 表示上の最大長（音は実長で鳴らす）
 const STOP_TAIL = 1.0; // 自動停止の安全マージン（秒）
 
@@ -1633,13 +1633,7 @@ useEffect(() => {
 
       const x = baseX + 1;
 
-      // トレイル
-      if(effectLevel!=="focus" && isPlayingRef.current && yTop>=0 && yTop<=keylineY){
-        if(!trailsRef.current.has(n.i)) trailsRef.current.set(n.i, []);
-        const trail = trailsRef.current.get(n.i);
-        trail.push({ x: cx, y: yTop + h/2, time: t, color: isWhite(n.midi) ? COLORS.trailWhite : COLORS.trailBlack });
-        if(trail.length>8) trail.shift();
-      }
+      // トレイル: ノート上に縦線として現れて視認性を下げるため無効化
 
       const landedAt = landedAtRef.current.get(n.i);
       const litUntil = landedAt!=null ? (landedAt + Math.max(MIN_LIT_SEC, durSec/rateRef.current)) : 0;
@@ -1690,19 +1684,22 @@ useEffect(() => {
         // 音名表示
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.font = "bold 13px ui-sans-serif, system-ui, sans-serif";
-        
+
         for(const shape of overlayShapes){
-          const noteName = noteStyle === "note-jp" 
-            ? nameDoReMi(shape.midi).name 
+          const noteName = noteStyle === "note-jp"
+            ? nameDoReMi(shape.midi).name
             : nameAG(shape.midi).name;
-          
+
+          // ノート幅に応じてフォントサイズを動的にスケール（最小14px、最大28px）
+          const fontSize = Math.max(14, Math.min(28, shape.width * 0.55));
+          ctx.font = `bold ${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+
           // 影（読みやすさ向上）
-          ctx.fillStyle = "rgba(0,0,0,0.4)";
+          ctx.fillStyle = "rgba(0,0,0,0.45)";
           ctx.fillText(noteName, shape.cx + 1, shape.cy + 1);
-          
+
           // 本体
-          ctx.fillStyle = "rgba(255,255,255,0.95)";
+          ctx.fillStyle = "rgba(255,255,255,0.98)";
           ctx.fillText(noteName, shape.cx, shape.cy);
         }
       } else {
@@ -1723,7 +1720,6 @@ useEffect(() => {
       ctx.restore();
     }
 
-    if(effectLevel!=="focus") drawTrails(ctx, trailsRef.current, t);
     if(effectLevel!=="focus") drawAuras(ctx, aurasRef.current, dt, keylineY);
     drawRipples(ctx, ripplesRef.current, dt);
     drawParticles(ctx, particlesRef.current, dt);
