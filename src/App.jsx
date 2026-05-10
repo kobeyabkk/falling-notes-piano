@@ -1536,8 +1536,11 @@ useEffect(() => {
     const noteBatches = new Map();
     const overlayShapes = [];
     const metrics = { drawnNotes: 0, nearKeyline: 0 };
-    const drawRectOnly = effectLevel === "focus" || noteStyle === "rect";
-    const shouldDrawOverlay = !drawRectOnly;
+    const isLabelStyle = noteStyle === "note-jp" || noteStyle === "note-en";
+    const isShapeStyle = noteStyle === "star" || noteStyle === "heart";
+    // ラベルは集中モードでも表示する（ユーザーが noteStyle で明示的にラベルを選んでいるため）
+    // 星・ハート等の装飾シェイプは集中モードで非表示
+    const shouldDrawOverlay = isLabelStyle || (isShapeStyle && effectLevel !== "focus");
 
     // 可視範囲のノートだけを走査
     const lookBack = (totalVisual / SPEED) + VISUAL_MAX_SEC + 1.0;
