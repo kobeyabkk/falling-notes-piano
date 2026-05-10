@@ -1,6 +1,1 @@
-{
-  "rewrites": [
-    { "source": "/",          "destination": "/pixel-perfect-piano.html" },
-    { "source": "/index.html","destination": "/pixel-perfect-piano.html" }
-  ]
-}
+{}
