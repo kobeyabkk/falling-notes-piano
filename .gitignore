@@ -1,8 +1,12 @@
 # dependencies
 node_modules/
+node_modules/.vite/
 
 # build output
 dist/
+
+# local Claude Code preview config
+.claude/
 
 # env
 .env
