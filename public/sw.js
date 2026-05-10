@@ -1,5 +1,5 @@
 /* Falling Notes Piano - Service Worker */
-const VERSION = "v1.1.0";
+const VERSION = "v1.2.0";
 const CACHE_PREFIX = "fnp-static-";
 const STATIC_CACHE = `${CACHE_PREFIX}${VERSION}`;
 
